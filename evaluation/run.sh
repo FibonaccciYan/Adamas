@@ -1,0 +1,1 @@
+python test.py  --model lmsys/longchat-7b-v1.5-32k --token_budget 64  --hadamard
