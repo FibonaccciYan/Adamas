@@ -209,5 +209,18 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/linux,python,visualstudiocode
 
+results/
+datasets/
+outputs/
+
+*.ipynb
+
+evaluation/LongBench/pred
+evaluation/LongBench/pred_e
+evaluation/passkey/results
+evaluation/pg19/results
+
+*.egg-info/
+
 test_results/*
 HSA_small.zip
