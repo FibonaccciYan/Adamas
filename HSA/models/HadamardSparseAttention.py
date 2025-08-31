@@ -3,7 +3,6 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from torch.profiler import record_function
 from torch import nn
 
 from transformers.models.llama.configuration_llama import LlamaConfig
@@ -12,7 +11,7 @@ from transformers.cache_utils import Cache
 
 import HSA.utils
 
-from fast_hadamard_transform import hadamard_transform
+# from fast_hadamard_transform import hadamard_transform
 import faster_hadamard_transform
 
 import pdb
@@ -65,49 +64,6 @@ class HadamardSparseAttention(nn.Module):
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
-    
-
-    # def pack_2bit(self, x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    #     """
-    #     Packs a tensor of shape `[num_heads, seq_len, head_dim]` into a 2-bit packed tensor.
-    #     The output shape is `[num_heads, seq_len, head_dim // 8]`.
-    #     """
-    #     *dims, seq_len, hd = x.shape
-    #     assert hd % 8 == 0, "The last dimension(hd) must be divisible by 8 for 2-bit packing."
-    #     x = x.view(*dims, seq_len, -1, 8)
-
-    #     x = x.to(torch.int16)
-    #     shifts = torch.tensor([14, 12, 10, 8, 6, 4, 2, 0], dtype=torch.int16, device=x.device)
-    #     packed_int16 = torch.zeros((*dims, seq_len, x.shape[-2]), dtype=torch.int16, device=x.device)
-    #     for i in range(8):
-    #         shifted = torch.bitwise_left_shift(x[..., i], shifts[i])
-    #         packed_int16 = torch.bitwise_or(packed_int16, shifted)
-
-    #     return packed_int16.view(dtype)
-
-    
-    # def unpack_2bit(self, packed: torch.Tensor) -> torch.Tensor:
-    #     """
-    #     Unpacks a 2-bit packed tensor to its original shape.
-    #     Input shape: `[num_heads, seq_len, head_dim // 8]`
-    #     Output shape: `[num_heads, seq_len, head_dim]`
-    #     """
-    #     packed_int16 = packed.view(torch.uint16).to(torch.int16)
-        
-    #     mask = 0x03
-        
-    #     *dims, seq_len, packed_dim = packed_int16.shape
-    #     unpacked = torch.zeros((*dims, seq_len, packed_dim * 8), dtype=torch.uint8, device=packed.device)
-        
-    #     shifts = torch.tensor([14, 12, 10, 8, 6, 4, 2, 0], dtype=torch.int16, device=packed.device)
-        
-    #     for i in range(8):
-    #         unpacked[..., i::8] = torch.bitwise_and(
-    #             torch.bitwise_right_shift(packed_int16, shifts[i]), 
-    #             mask
-    #         ).to(torch.uint8)
-        
-    #     return unpacked
 
 
     def forward(

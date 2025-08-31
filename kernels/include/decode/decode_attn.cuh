@@ -1167,9 +1167,9 @@ MaxPossibleSampleWithPagedKVCache(DTypeIn* q,
 			constexpr uint32_t bdy = GROUP_SIZE; // 1
 			constexpr uint32_t num_threads = std::max(128U, bdx * bdy); // 128
 			constexpr uint32_t bdz = num_threads / (bdx * bdy); // 8 -> 64
-			// constexpr uint32_t tile_size_per_bdx =
-			// 	(GROUP_SIZE == 1 ? (sizeof(DTypeIn) == 1 ? 2U : 4U) : 1U);
-			constexpr uint32_t tile_size_per_bdx = 16U;
+			constexpr uint32_t tile_size_per_bdx =
+				(GROUP_SIZE == 1 ? (sizeof(DTypeIn) == 1 ? 2U : 4U) : 1U);
+			// constexpr uint32_t tile_size_per_bdx = 16U;
 			const uint32_t smem_size =
 				2 * num_stages_smem * tile_size_per_bdx * bdy * bdz * head_dim * sizeof(DTypeIn) +
 				tile_size_per_bdx * num_threads * sizeof(DTypeIn*); // 36KB
