@@ -10,18 +10,18 @@ avg_length=(32768)
 token_budget=(1024)
 page_size=1
 
-# Profile approx_attn kernel
-echo "|Profile approx_attn kernel|"
-./bench_batch_decode -a seqlen=32768 -a page_budget=[256,512,1024,2048,4096,8192] -a page_size=$page_size
+# # Profile approx_attn kernel
+# echo "|Profile approx_attn kernel|"
+# ./bench_batch_decode -a seqlen=32768 -a page_budget=[256,512,1024,2048,4096,8192] -a page_size=$page_size
 
-# Profile topk kernel
-echo "|Profile topk kernel|"
-length=${#avg_length[@]}
-for i in $(seq 0 $((length - 1))); do
-  avg_length_divided=$((avg_length[$i] / $page_size))
-  token_budget_divided=$((token_budget[$i] / $page_size))
-  ./bench_decode_select_k -a seq_len=$avg_length_divided -a k=$token_budget_divided
-done
+# # Profile topk kernel
+# echo "|Profile topk kernel|"
+# length=${#avg_length[@]}
+# for i in $(seq 0 $((length - 1))); do
+#   avg_length_divided=$((avg_length[$i] / $page_size))
+#   token_budget_divided=$((token_budget[$i] / $page_size))
+#   ./bench_decode_select_k -a seq_len=$avg_length_divided -a k=$token_budget_divided
+# done
 
 # Profile estimate kernel
 echo "|Profile estimate kernel|"

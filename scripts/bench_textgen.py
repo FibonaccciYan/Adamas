@@ -19,7 +19,7 @@ class ModelConfig:
 MODEL_CFGS = {
     "llama2-7b":
         ModelConfig(
-            model_path="/cpfs/2926428ee2463e44/shared/public/wendao/models/llama/Llama-2-7b-chat-hf"
+            model_path="/data1/model/llama2/meta-llama/Llama-2-7b-chat-hf"
         ),
 }
 

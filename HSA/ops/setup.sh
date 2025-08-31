@@ -1,8 +1,6 @@
 mkdir -p build
 cd build
 
-export TORCH_CUDA_ARCH_LIST="8.9+PTX"
-
 cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'` -GNinja ..
 ninja
 

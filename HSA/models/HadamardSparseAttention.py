@@ -12,7 +12,7 @@ from transformers.cache_utils import Cache
 
 import HSA.utils
 
-from fast_hadamard_transform import hadamard_transform
+# from fast_hadamard_transform import hadamard_transform
 import faster_hadamard_transform
 
 import pdb

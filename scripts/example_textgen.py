@@ -2,7 +2,7 @@ from transformers import AutoTokenizer
 import torch
 import argparse
 
-# MODEL_PATH = "/cpfs/2926428ee2463e44/shared/public/wendao/models/llama/Llama-2-7b-chat-hf"
+# MODEL_PATH = "/data1/model/llama2/meta-llama/Llama-2-7b-chat-hf"
 MODEL_PATH = "/cpfs/user/yansiyuan/models/longchat-7b-v1.5-32k"
 DEVICE = torch.device("cuda:0")
 DTYPE = torch.float16
