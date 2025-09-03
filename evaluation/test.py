@@ -114,9 +114,8 @@ if __name__ == "__main__":
     layers = 32
     nh = 32
 
-    # MODEL_DIR = "/cpfs/2926428ee2463e44/shared/public/wendao/models/"
     # model_path = os.path.join(MODEL_DIR, args.model)
-    model_path = "/cpfs/user/yansiyuan/models/longchat-7b-v1.5-32k"
+    model_path = "/data1/ysy/model/lmsys/longchat-7b-v1.5-32k"
     prompt = "Where did yellowstone national park get its name?"
     # prompt = "What can i do for lunch with tomato, egg, and bread?"
 

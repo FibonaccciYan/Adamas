@@ -18,7 +18,7 @@ from transformers.models.mistral.modeling_mistral import MistralAttention
 from transformers.cache_utils import Cache, StaticCache
 from transformers.modeling_flash_attention_utils import _flash_attention_forward
 
-from fast_hadamard_transform import hadamard_transform
+import faster_hadamard_transform
 
 
 def flash_attention_forward(
@@ -68,9 +68,9 @@ def flash_attention_forward(
         if past_key_value is not None:
             # TEMP
             if self.layer_idx > 1:
-                from fast_hadamard_transform import hadamard_transform
                 thresholds = torch.tensor([-10, 0, 10], device=query_states.device)
-                key_code   = torch.bucketize(hadamard_transform(key_states),   thresholds)
+                # key_code   = torch.bucketize(faster_hadamard_transform.hadamard_transform(key_states, inplace=False),   thresholds)
+                key_code   = torch.bucketize(key_states,   thresholds)
             else:
                 key_code = None
 
@@ -188,8 +188,10 @@ def hadamard_forward(
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
     thresholds = torch.tensor([-10, 0, 10], device=query_states.device)
-    key_code   = torch.bucketize(hadamard_transform(key_states),   thresholds)
-    query_code = torch.bucketize(hadamard_transform(query_states), thresholds)
+    # key_code   = torch.bucketize(faster_hadamard_transform.hadamard_transform(key_states, inplace=False),   thresholds)
+    # query_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(query_states, inplace=False), thresholds)
+    key_code   = torch.bucketize(key_states,   thresholds)
+    query_code = torch.bucketize(query_states, thresholds)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache

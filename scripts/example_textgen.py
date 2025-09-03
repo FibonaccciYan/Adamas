@@ -3,7 +3,7 @@ import torch
 import argparse
 
 # MODEL_PATH = "/data1/model/llama2/meta-llama/Llama-2-7b-chat-hf"
-MODEL_PATH = "/cpfs/user/yansiyuan/models/longchat-7b-v1.5-32k"
+MODEL_PATH = "/data1/ysy/model/lmsys/longchat-7b-v1.5-32k"
 DEVICE = torch.device("cuda:0")
 DTYPE = torch.float16
 torch.set_default_dtype(DTYPE)
