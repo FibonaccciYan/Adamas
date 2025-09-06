@@ -10,7 +10,7 @@ from transformers import AutoTokenizer, pipeline, AutoModelForCausalLM
 from tqdm import tqdm, trange
 from tqdm.contrib import tenumerate
 
-# from evaluation.llama import enable_tuple_kv_cache_for_llama
+from evaluation.llama import enable_tuple_kv_cache_for_llama
 # from evaluation.mistral import enable_tuple_kv_cache_for_mistral
 
 from evaluation.hadamard_attention import enable_hadamard_dynamic_cache_for_llama
@@ -68,12 +68,12 @@ def test_model(pipe, prompt_text, pass_key):
     q_input = pipe.tokenizer(que, return_tensors="pt").to("cuda")
     q_input.input_ids = q_input.input_ids[:, 1:]
 
-    past_key_values = HadamardDynamicCache()
+    # past_key_values = HadamardDynamicCache()
 
     with torch.no_grad():
         output = pipe.model(
             input_ids=input.input_ids,
-            past_key_values=past_key_values,
+            past_key_values=None,
             use_cache=True,
         )
         past_key_values = output.past_key_values
@@ -171,8 +171,8 @@ def main(args):
         torch.cuda.empty_cache()
 
         if 'llama' in model.lower() or 'longchat' in model.lower():
-            # enable_tuple_kv_cache_for_llama()
-            enable_hadamard_dynamic_cache_for_llama()
+            enable_tuple_kv_cache_for_llama()
+            # enable_hadamard_dynamic_cache_for_llama()
         # if 'mistral' in model.lower():
         #     enable_tuple_kv_cache_for_mistral()
 
