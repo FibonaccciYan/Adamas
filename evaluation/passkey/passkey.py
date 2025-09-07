@@ -179,7 +179,6 @@ def main(args):
         loaded = AutoModelForCausalLM.from_pretrained(
             model,
             device_map="auto",
-            attn_implementation="flash_attention_2",
             torch_dtype=torch.float16,
             trust_remote_code=True,
             low_cpu_mem_usage=True,

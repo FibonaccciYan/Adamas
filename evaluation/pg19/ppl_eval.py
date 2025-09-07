@@ -22,7 +22,7 @@ parser.add_argument("--output_dir", type=str)
 
 parser.add_argument("--num_eval_tokens", type=int, default=None)
 
-parser.add_argument("--quest", action="store_true", help="Enable quest attention")
+parser.add_argument("--HSA", action="store_true", help="Enable HSA attention")
 parser.add_argument("--token_budget", type=int, default=1024)
 parser.add_argument("--chunk_size", type=int, default=16)
 
@@ -61,13 +61,13 @@ nlls = []
 loss_fn = CrossEntropyLoss(reduction="none")
 past_key_values = None
 
-if args.quest:
-    print("Enable quest attention")
-    from evaluation.quest_attention import (
-        enable_quest_attention_eval,
+if args.HSA:
+    print("Enable HSA attention")
+    from evaluation.hadamard_attention import (
+        enable_hadamard_attention_eval,
     )
 
-    enable_quest_attention_eval(model, args)
+    enable_hadamard_attention_eval(model, args)
 
 os.makedirs(args.output_dir, exist_ok=True)
 f = open(f"{args.output_dir}/log.txt", "w")
