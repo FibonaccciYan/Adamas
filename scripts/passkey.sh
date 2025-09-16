@@ -10,7 +10,7 @@ mkdir -p $OUTPUT_DIR
 
 length=100000
 
-for token_budget in 16 32 64 128 256 512
+for token_budget in 16 32 64 128 256 512 1024 2048 4096
 do
     python passkey.py -m $MODELPATH \
         --iterations 100 --fixed-length $length \

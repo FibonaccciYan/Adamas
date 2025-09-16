@@ -70,7 +70,7 @@ if args.HSA:
     enable_hadamard_attention_eval(model, args)
 
 os.makedirs(args.output_dir, exist_ok=True)
-f = open(f"{args.output_dir}/log.txt", "w")
+f = open(f"{args.output_dir}/log_HSA_{args.token_budget}.txt", "w")
 
 num_eval_tokens = 0
 for text in data["text"][:1]:
@@ -110,5 +110,5 @@ f.close()
 
 ppl = torch.exp(torch.stack(nlls).mean())
 print(ppl.item())
-with open(f"{args.output_dir}/ppl.txt", "w") as f:
+with open(f"{args.output_dir}/ppl_HSA_{args.token_budget}.txt", "w") as f:
     f.write(f"{ppl.item()}\n")

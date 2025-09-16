@@ -31,6 +31,7 @@ def parse_args(args=None):
             "llama/Llama-2-7b-chat-hf",
             "llama/Meta-Llama-3-8B-Instruct",
             "lmsys/longchat-7b-v1.5-32k",
+            "NousResearch/Yarn-Llama-2-7b-128k",
         ],
     )
     parser.add_argument("--token_budget", type=int, default=None)
@@ -42,7 +43,7 @@ def parse_args(args=None):
 def load_model_and_tokenizer(path):
     tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
-        path, trust_remote_code=True, torch_dtype=torch.bfloat16, device_map="auto", attn_implementation="flash_attention_2"
+        path, trust_remote_code=True, torch_dtype=torch.bfloat16, device_map="auto",
     )
     model = model.eval()
 
@@ -86,7 +87,8 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=10, past_key_valu
 def get_attn_weights(model, tokenizer, prompt, max_new_tokens=10, model_type="Vanilla"):
     # attns_weights: [output_len * [layers * Tensor[batch_size, num_heads, q_len, kv_len]]]
     # attns_weights_v: [output_len * [layers * Tensor[batch_size, num_heads, q_len, kv_len]]]
-    past_key_values = HadamardDynamicCache() if model_type == "Hadamard" else None
+    # past_key_values = HadamardDynamicCache() if model_type == "Hadamard" else None
+    past_key_values = None
     response, output_ids = generate_response(model, tokenizer, prompt, max_new_tokens, past_key_values)
 
     prefill_len = tokenizer(prompt, return_tensors="pt", add_special_tokens=True).input_ids.shape[1]
@@ -115,7 +117,8 @@ if __name__ == "__main__":
     nh = 32
 
     # model_path = os.path.join(MODEL_DIR, args.model)
-    model_path = "/data1/ysy/model/lmsys/longchat-7b-v1.5-32k"
+    # model_path = "/data1/ysy/model/lmsys/longchat-7b-v1.5-32k"
+    model_path = "/data0/ysy/models/NousResearch/Yarn-Llama-2-7b-128k"
     prompt = "Where did yellowstone national park get its name?"
     # prompt = "What can i do for lunch with tomato, egg, and bread?"
 
