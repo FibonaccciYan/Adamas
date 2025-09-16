@@ -77,23 +77,23 @@ def benchmark_hsa():
     )
     hidden_size = model._config.hidden_size
 
-    # warmup
-    # clear cuda cache
-    torch.cuda.empty_cache()
+    # # warmup
+    # # clear cuda cache
+    # torch.cuda.empty_cache()
 
-    # Prefill Stage
-    hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
-    model(
-        inputs_embeds=hidden_states,
-    )
-    # Start decoding decode_len tokens
-    for _ in range(decode_len):
-        hidden_states = torch.randn(1, 1, hidden_size, dtype=dtype, device=device)
-        model(
-            inputs_embeds=hidden_states,
-        )
+    # # Prefill Stage
+    # hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
+    # model(
+    #     inputs_embeds=hidden_states,
+    # )
+    # # Start decoding decode_len tokens
+    # for _ in range(decode_len):
+    #     hidden_states = torch.randn(1, 1, hidden_size, dtype=dtype, device=device)
+    #     model(
+    #         inputs_embeds=hidden_states,
+    #     )
     
-    model.hsa_clear()
+    # model.hsa_clear()
 
     prefill_latency = []
     decode_latency = []
@@ -102,27 +102,28 @@ def benchmark_hsa():
         # clear cuda cache
         torch.cuda.empty_cache()
 
+        # Prefill Stage
+        ts = time.perf_counter()
+        hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
+        model(
+            inputs_embeds=hidden_states,
+        )
+        te = time.perf_counter()
+        prefill_latency.append(te - ts)
+
+        # Start decoding decode_len tokens
         with profile(activities=[
             ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True, with_stack=True) as prof:
-            # Prefill Stage
-            ts = time.perf_counter()
-            hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
-            model(
-                inputs_embeds=hidden_states,
-            )
-            te = time.perf_counter()
-            prefill_latency.append(te - ts)
-            # Start decoding decode_len tokens
-            # with record_function("model_inference"):
-            for _ in range(decode_len):
-                ts = time.perf_counter()
-                hidden_states = torch.randn(1, 1, hidden_size, dtype=dtype, device=device)
-                model(
-                    inputs_embeds=hidden_states,
-                )
-                te = time.perf_counter()
-                decode_latency.append(te - ts)
-                prof.step()
+            with record_function("model_inference"):
+                for _ in range(decode_len):
+                    ts = time.perf_counter()
+                    hidden_states = torch.randn(1, 1, hidden_size, dtype=dtype, device=device)
+                    model(
+                        inputs_embeds=hidden_states,
+                    )
+                    te = time.perf_counter()
+                    decode_latency.append(te - ts)
+                    prof.step()
         prof.export_chrome_trace(f"../test_results/profile_{token_budget}-{context_len}.json")
         model.hsa_clear()
     
@@ -132,7 +133,7 @@ def benchmark_hsa():
     print("page_size,token_budget,context_len,decode_len,avg_prefill_latency,avg_decode_latency")
     print(f"{page_size},{token_budget},{context_len},{decode_len},{avg_prefill_latency},{avg_decode_latency}")
 
-    print(prof.key_averages().table(sort_by="cuda_time_total"))
+    # print(prof.key_averages().table(sort_by="cuda_time_total"))
 
 if __name__ == "__main__":
     benchmark_hsa()

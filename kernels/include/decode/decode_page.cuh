@@ -384,9 +384,9 @@ __device__ __forceinline__ void vec_bucketize_and_pack_2bit(DType* x, DType* o) 
 
 	const DType thresholds[3] = {-10, 0, 10};
 	uint16_t packed = 0;
+	uint16_t bucket = 0;
 #pragma unroll
 	for(uint32_t i = 0; i < vec_size; ++i) {
-		uint16_t bucket = 0;
 		bucket = static_cast<uint16_t>(
 			(vec[i] > thresholds[0]) + 
 			(vec[i] > thresholds[1]) + 
