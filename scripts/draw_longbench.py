@@ -4,8 +4,6 @@ import matplotlib.pyplot as plt
 plt.rcParams.update({
     "font.size": 14,
     "font.family": "serif",   # 论文常用字体
-    "axes.spines.top": False,
-    "axes.spines.right": False,
     "figure.dpi": 300
 })
 

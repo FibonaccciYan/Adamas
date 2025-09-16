@@ -13,7 +13,7 @@ do
     do
         for context in "${CONTEXT_POOL[@]}"
         do
-            python3 bench_textgen.py --context_len $context --decode_len 256 --token_budget $budget --iteration 5 --page_size $page_size > "../test_results/log_${budget}_${context}_n32.log" 2>&1
+            CUDA_LAUNCH_BLOCKING=1 compute-sanitizer --tool memcheck --leak-check full python3 bench_textgen.py --context_len $context --decode_len 256 --token_budget $budget --iteration 5 --page_size $page_size > "../test_results/log_${budget}_${context}_n32.log" 2>&1
         done
     done
 done
