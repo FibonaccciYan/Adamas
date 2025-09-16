@@ -13,3 +13,6 @@
 [submodule "kernels/3rdparty/raft"]
 	path = kernels/3rdparty/raft
 	url = https://github.com/rapidsai/raft
+[submodule "kernels/3rdparty/applied-ai"]
+	path = kernels/3rdparty/applied-ai
+	url = https://github.com/meta-pytorch/applied-ai

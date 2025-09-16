@@ -15,7 +15,7 @@ from transformers.models.llama.modeling_llama import (
 )
 
 from transformers.models.mistral.modeling_mistral import MistralAttention
-from transformers.cache_utils import Cache, StaticCache
+from transformers.cache_utils import Cache, StaticCache, DynamicCache
 from transformers.modeling_flash_attention_utils import _flash_attention_forward
 
 import faster_hadamard_transform
@@ -66,17 +66,9 @@ def flash_attention_forward(
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
         if past_key_value is not None:
-            # TEMP
-            if self.layer_idx > 1:
-                thresholds = torch.tensor([-10, 0, 10], device=query_states.device)
-                # key_code   = torch.bucketize(faster_hadamard_transform.hadamard_transform(key_states, inplace=False),   thresholds)
-                key_code   = torch.bucketize(key_states,   thresholds)
-            else:
-                key_code = None
-
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states, _ = past_key_value.update(key_states, value_states, key_code, self.layer_idx, cache_kwargs)
+            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
         # TODO: These transpose are quite inefficient but Flash Attention requires the layout [batch_size, sequence_length, num_heads, head_dim]. We would need to refactor the KV cache
         # to be able to avoid many of these transpose/reshape/view.
@@ -187,28 +179,41 @@ def hadamard_forward(
         cos, sin = position_embeddings
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
-    thresholds = torch.tensor([-10, 0, 10], device=query_states.device)
-    # key_code   = torch.bucketize(faster_hadamard_transform.hadamard_transform(key_states, inplace=False),   thresholds)
-    # query_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(query_states, inplace=False), thresholds)
-    key_code   = torch.bucketize(key_states,   thresholds)
-    query_code = torch.bucketize(query_states, thresholds)
+    # New cache format
+    if isinstance(past_key_value, DynamicCache):
+        if use_cache:
+            key_states, value_states = past_key_value.update(key_states, value_states, layer_idx=self.layer_idx)
+    # Legacy cache format
+    else:
+        if past_key_value is not None:
+            # reuse k, v, self_attention
+            key_states = torch.cat([past_key_value[0], key_states], dim=2)
+            value_states = torch.cat([past_key_value[1], value_states], dim=2)
+        past_key_value = (key_states, value_states) if use_cache else None
 
-    if past_key_value is not None:
-        # sin and cos are specific to RoPE models; cache_position needed for the static cache
-        cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-        key_states, value_states, key_code = past_key_value.update(key_states, value_states, key_code, self.layer_idx, cache_kwargs)
+    # if past_key_value is not None:
+    #     # sin and cos are specific to RoPE models; cache_position needed for the static cache
+    #     cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+    #     key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
     key_states = repeat_kv(key_states, self.num_key_value_groups)
     value_states = repeat_kv(value_states, self.num_key_value_groups)
-    key_code = repeat_kv(key_code, self.num_key_value_groups)
+    # key_code = repeat_kv(key_code, self.num_key_value_groups)
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(
         self.head_dim
     )
 
+    thresholds = torch.tensor([-10, 0, 10], device=query_states.device)
+    key_code   = torch.bucketize(faster_hadamard_transform.hadamard_transform(key_states, inplace=False), thresholds, out_int32=True)
+    query_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(query_states, inplace=False), thresholds, out_int32=True)
+    
+    # import gc
+    # gc.collect()
+    # torch.cuda.empty_cache()
     distances = nn.functional.pairwise_distance(query_code, key_code, p=1).unsqueeze(2)  # [bsz, nh, q_len, kv_seq_len]
 
-    token_budget = min(self.token_budget, key_states.shape[-2])
+    token_budget = min(self.token_budget, key_code.shape[-2])
     _, topk_indices = distances.topk(k=token_budget, dim=-1, largest=False)
 
     mask_bottom = torch.zeros_like(attn_weights, dtype=torch.bool)
@@ -218,12 +223,12 @@ def hadamard_forward(
     
 
     if attention_mask is not None:  # no matter the length, we just slice it
-        causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+        causal_mask = attention_mask[:, :, :, : key_code.shape[-2]]
         attn_weights = attn_weights + causal_mask
     
     # upcast attention to fp32
     attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
-        query_states.dtype
+        value_states.dtype
     )
     attn_output = torch.matmul(attn_weights, value_states)
 

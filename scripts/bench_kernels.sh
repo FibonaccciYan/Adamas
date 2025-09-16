@@ -2,7 +2,7 @@
 
 cd ../kernels/build
 export CUDA_LAUNCH_BLOCKING=0
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=2
 
 # avg_length=(5819 15370 11984 14101 24723 8154)
 # token_budget=(256 512 1024 512 4096 512)
