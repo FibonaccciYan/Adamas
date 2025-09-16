@@ -190,7 +190,7 @@ __device__ __forceinline__ void compute_manhatton_distances(const DTypeIn* smem_
 			const uint16_t packed_h = reinterpret_cast<const uint16_t&>(h_vec[i]);
 
 			uint16_t res = packed_q ^ packed_h;
-			acc += __popc(res & 0x5555) + __popc(res & 0xAAAA) << 1;
+			acc += __popc(res & 0x5555) + (__popc(res & 0xAAAA) << 1);
 
 
 			// // packed_q , packed_h : uint16_t，里边各有 8 个 2-bit
@@ -348,13 +348,44 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 	constexpr uint32_t vec_bits = sizeof(DTypeIn) * vec_size * 8;
 	const IdType last_indptr = paged_hadamard.indptr[paged_hadamard.batch_size];
 
+	// 仅在可疑 block/线程打印一次关键上下文（覆盖 head 28/30）
+	if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+		printf("[MDBG] b=%u head=%u cur_begin=%u cur_end=%u last=%u h_chunk_len=%u page_size=%u\n",
+				batch_idx, h_head_idx, cur_page_indptr_begin, cur_page_indptr_end,
+				last_indptr, h_chunk_len, paged_hadamard.page_size);
+	}
+
 	static_assert(num_stages_smem <= bdx);
 #pragma unroll
+	// for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+	// 	// page_storage == PageStorage::kIndices
+	// 	uint32_t page_iter = cur_page_indptr_begin + (((j * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
+	// 	uint32_t entry_idx = (((j * bdz + tz) * bdy + ty) * bdx + tx) % paged_hadamard.page_size;
+	// 	if(page_iter < last_indptr) {
+	// 		// layout == QKVLayout::kNHD
+	// 		// protective_get_k_ptr
+	// 		h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
+	// 			((__ldg(paged_hadamard.indices + page_iter) * paged_hadamard.page_size + entry_idx) * paged_hadamard.num_heads + h_head_idx) * paged_hadamard.head_dim;
+	// 	} else {
+	// 		h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data;
+	// 	}
+	// }
 	for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
 		// page_storage == PageStorage::kIndices
 		uint32_t page_iter = cur_page_indptr_begin + (((j * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
 		uint32_t entry_idx = (((j * bdz + tz) * bdy + ty) * bdx + tx) % paged_hadamard.page_size;
-		if(page_iter < last_indptr) {
+
+		// 仅允许访问当前 chunk 的 [begin, end)
+        bool page_ok = (page_iter < cur_page_indptr_end);
+
+		if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+			&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+			printf("[MDBG] preload j=%u page_iter=%u entry_idx=%u ok=%d (end=%u)\n",
+				j, page_iter, entry_idx, (int)page_ok, cur_page_indptr_end);
+		}
+
+		if(page_ok) {
 			// layout == QKVLayout::kNHD
 			// protective_get_k_ptr
 			h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
@@ -365,6 +396,11 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 	}
 	block.sync();
 
+	if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+		printf("Checkpoint 1: after preload h_ptrs_smem\n");
+	}
+
 	DTypeIn* h_ptrs[tile_size_per_bdx];
 #pragma unroll
 	for(uint32_t iter = 0; iter < num_stages_smem; ++iter) {
@@ -374,32 +410,72 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 				h_ptrs_smem[((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j] + tx * vec_size;
 		}
 #pragma unroll
+		// for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+		// 	cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
+		// 		h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
+		// 			tx * vec_size,
+		// 		h_ptrs[j],
+		// 		((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j < h_chunk_len);
+		// }
 		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+			// 计算对应 page_iter，复用相同判定
+            uint32_t page_iter = cur_page_indptr_begin +
+                (((/*iter0*/ 0 * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
+            bool page_ok = (page_iter < cur_page_indptr_end);
+
+			bool pred_ok = (((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) < h_chunk_len && page_ok;
+
 			cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
 				h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
 					tx * vec_size,
 				h_ptrs[j],
-				((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j < h_chunk_len);
+				pred_ok);
 		}
 		cp_async::commit_group();
 		stage_idx = (stage_idx + 1) % num_stages_smem;
 	}
 
+	if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+		printf("Checkpoint 2: after initial loads\n");
+	}
+
+// #pragma unroll 2
+// 	for(uint32_t iter = 0; iter < ceil_div(h_chunk_len, tile_size_per_bdx * bdy * bdz); ++iter) {
+// 		if((iter + num_stages_smem) % bdx == 0) {
+// #pragma unroll
+// 			for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+// 				// page_storage == PageStorage::kIndices
+// 				uint32_t page_iter = cur_page_indptr_begin +
+// 									((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
+// 									((j * bdz + tz) * bdy + ty) * bdx + tx) /
+// 										paged_hadamard.page_size;
+// 				uint32_t entry_idx = ((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
+// 									((j * bdz + tz) * bdy + ty) * bdx + tx) %
+// 									paged_hadamard.page_size;
+									
+// 				if(page_iter < last_indptr) {
+// 					// layout == QKVLayout::kNHD
+// 					// protective_get_k_ptr
+// 					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
+// 						((__ldg(paged_hadamard.indices + page_iter) * paged_hadamard.page_size + entry_idx) * paged_hadamard.num_heads + h_head_idx) * paged_hadamard.head_dim;
+// 				} else {
+// 					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data;
+// 				}
+// 			}
+// 		}
 #pragma unroll 2
 	for(uint32_t iter = 0; iter < ceil_div(h_chunk_len, tile_size_per_bdx * bdy * bdz); ++iter) {
 		if((iter + num_stages_smem) % bdx == 0) {
 #pragma unroll
 			for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
-				// page_storage == PageStorage::kIndices
-				uint32_t page_iter = cur_page_indptr_begin +
-									((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
-									((j * bdz + tz) * bdy + ty) * bdx + tx) /
-										paged_hadamard.page_size;
-				uint32_t entry_idx = ((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
-									((j * bdz + tz) * bdy + ty) * bdx + tx) %
-									paged_hadamard.page_size;
+				uint32_t linear = (iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz
+                                 + ((j * bdz + tz) * bdy + ty) * bdx + tx;
+                uint32_t page_iter = cur_page_indptr_begin + linear / paged_hadamard.page_size;
+                uint32_t entry_idx = linear % paged_hadamard.page_size;
+                bool page_ok = (page_iter < cur_page_indptr_end);
 									
-				if(page_iter < last_indptr) {
+				if(page_ok) {
 					// layout == QKVLayout::kNHD
 					// protective_get_k_ptr
 					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
@@ -408,6 +484,11 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data;
 				}
 			}
+		}
+
+		if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+			printf("Checkpoint 3: iter=%u\n", iter);
 		}
 		// compute manhatton distances
 		cp_async::wait_group<num_stages_smem - 1>();
@@ -422,6 +503,11 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 					h_chunk_len); // Note that o is [num_heads, h_chunk_len]. Exclude last page.
 		block.sync();
 
+		if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+			printf("Checkpoint 4: after compute iter=%u\n", iter);
+		}
+
 #pragma unroll
 		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
 			h_ptrs[j] = h_ptrs_smem[((((iter + num_stages_smem) % bdx) * bdz + tz) * bdy + ty) *
@@ -430,17 +516,33 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 						tx * vec_size;
 		}
 		// load h tiles
+// #pragma unroll
+// 		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+// 			cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
+// 				h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
+// 					tx * vec_size,
+// 				h_ptrs[j],
+// 				(((iter + num_stages_smem) * bdz + tz) * bdy + ty) * tile_size_per_bdx + j <
+// 					h_chunk_len);
+// 		}
 #pragma unroll
 		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+			uint32_t linear = ((iter + num_stages_smem) * bdz + tz) * bdy + ty;
+            linear = linear * tile_size_per_bdx + j;
+            bool pred_ok = (linear < h_chunk_len);
 			cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
 				h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
 					tx * vec_size,
 				h_ptrs[j],
-				(((iter + num_stages_smem) * bdz + tz) * bdy + ty) * tile_size_per_bdx + j <
-					h_chunk_len);
+				pred_ok);
 		}
 		cp_async::commit_group();
 		stage_idx = (stage_idx + 1) % num_stages_smem;
+
+		if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+			printf("Checkpoint 5: end of iter=%u\n", iter);	
+		}
 	}
 	cp_async::wait_group<0>();
 }
@@ -551,15 +653,15 @@ BatchDecodeWithPagedKVCacheKernel(DTypeIn* __restrict__ q,
 	constexpr uint32_t vec_bits = sizeof(DTypeIn) * vec_size * 8;
 	const IdType last_indptr = paged_kv.indptr[paged_kv.batch_size];
 
-	// 仅在可疑 block/线程打印一次关键上下文（覆盖 head 28/30）
-    if constexpr (partition_kv) {
-        if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
-            && threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
-            printf("[KDBG] b=%u head=%u cur_begin=%u cur_end=%u last=%u kv_chunk_len=%u page_size=%u\n",
-                   batch_idx, kv_head_idx, cur_page_indptr_begin, cur_page_indptr_end,
-                   last_indptr, kv_chunk_len, paged_kv.page_size);
-        }
-    }
+	// // 仅在可疑 block/线程打印一次关键上下文（覆盖 head 28/30）
+    // if constexpr (partition_kv) {
+    //     if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+    //         && threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+    //         printf("[KDBG] b=%u head=%u cur_begin=%u cur_end=%u last=%u kv_chunk_len=%u page_size=%u\n",
+    //                batch_idx, kv_head_idx, cur_page_indptr_begin, cur_page_indptr_end,
+    //                last_indptr, kv_chunk_len, paged_kv.page_size);
+    //     }
+    // }
 
 	static_assert(num_stages_smem <= bdx);
 #pragma unroll
@@ -581,13 +683,13 @@ BatchDecodeWithPagedKVCacheKernel(DTypeIn* __restrict__ q,
         // 仅允许访问当前 chunk 的 [begin, end)
         bool page_ok = (page_iter < cur_page_indptr_end);
 
-        if constexpr (partition_kv) {
-            if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
-                && threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
-                printf("[KDBG] preload j=%u page_iter=%u entry_idx=%u ok=%d (end=%u)\n",
-                    j, page_iter, entry_idx, (int)page_ok, cur_page_indptr_end);
-            }
-        }
+        // if constexpr (partition_kv) {
+        //     if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+        //         && threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+        //         printf("[KDBG] preload j=%u page_iter=%u entry_idx=%u ok=%d (end=%u)\n",
+        //             j, page_iter, entry_idx, (int)page_ok, cur_page_indptr_end);
+        //     }
+        // }
 
         if (page_ok) {
             k_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] =
