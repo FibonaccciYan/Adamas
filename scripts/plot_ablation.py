@@ -81,7 +81,7 @@ for i, (dataset, results) in enumerate(data.items()):
     # 设置标题
     ax.set_title(dataset)
     ax.set_ylabel("F1 Score", fontsize=12)
-    ax.set_xlabel("KV Cache Budget", fontsize=12)
+    ax.set_xlabel("Token Budget", fontsize=12)
 
     # 只显示逆时针旋转 45° 的 X 轴刻度
     ax.set_xscale("log", base=2)

@@ -348,44 +348,21 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 	constexpr uint32_t vec_bits = sizeof(DTypeIn) * vec_size * 8;
 	const IdType last_indptr = paged_hadamard.indptr[paged_hadamard.batch_size];
 
-	// 仅在可疑 block/线程打印一次关键上下文（覆盖 head 28/30）
-	if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
-		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
-		printf("[MDBG] b=%u head=%u cur_begin=%u cur_end=%u last=%u h_chunk_len=%u page_size=%u\n",
-				batch_idx, h_head_idx, cur_page_indptr_begin, cur_page_indptr_end,
-				last_indptr, h_chunk_len, paged_hadamard.page_size);
-	}
+	// // 仅在可疑 block/线程打印一次关键上下文（覆盖 head 28/30）
+	// if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+	// 	&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+	// 	printf("[MDBG] b=%u head=%u cur_begin=%u cur_end=%u last=%u h_chunk_len=%u page_size=%u\n",
+	// 			batch_idx, h_head_idx, cur_page_indptr_begin, cur_page_indptr_end,
+	// 			last_indptr, h_chunk_len, paged_hadamard.page_size);
+	// }
 
 	static_assert(num_stages_smem <= bdx);
 #pragma unroll
-	// for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
-	// 	// page_storage == PageStorage::kIndices
-	// 	uint32_t page_iter = cur_page_indptr_begin + (((j * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
-	// 	uint32_t entry_idx = (((j * bdz + tz) * bdy + ty) * bdx + tx) % paged_hadamard.page_size;
-	// 	if(page_iter < last_indptr) {
-	// 		// layout == QKVLayout::kNHD
-	// 		// protective_get_k_ptr
-	// 		h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
-	// 			((__ldg(paged_hadamard.indices + page_iter) * paged_hadamard.page_size + entry_idx) * paged_hadamard.num_heads + h_head_idx) * paged_hadamard.head_dim;
-	// 	} else {
-	// 		h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data;
-	// 	}
-	// }
 	for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
 		// page_storage == PageStorage::kIndices
 		uint32_t page_iter = cur_page_indptr_begin + (((j * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
 		uint32_t entry_idx = (((j * bdz + tz) * bdy + ty) * bdx + tx) % paged_hadamard.page_size;
-
-		// 仅允许访问当前 chunk 的 [begin, end)
-        bool page_ok = (page_iter < cur_page_indptr_end);
-
-		if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
-			&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
-			printf("[MDBG] preload j=%u page_iter=%u entry_idx=%u ok=%d (end=%u)\n",
-				j, page_iter, entry_idx, (int)page_ok, cur_page_indptr_end);
-		}
-
-		if(page_ok) {
+		if(page_iter < last_indptr) {
 			// layout == QKVLayout::kNHD
 			// protective_get_k_ptr
 			h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
@@ -394,12 +371,35 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 			h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data;
 		}
 	}
+	// for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+	// 	// page_storage == PageStorage::kIndices
+	// 	uint32_t page_iter = cur_page_indptr_begin + (((j * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
+	// 	uint32_t entry_idx = (((j * bdz + tz) * bdy + ty) * bdx + tx) % paged_hadamard.page_size;
+
+	// 	// 仅允许访问当前 chunk 的 [begin, end)
+    //     bool page_ok = (page_iter < cur_page_indptr_end);
+
+	// 	if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+	// 		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+	// 		printf("[MDBG] preload j=%u page_iter=%u entry_idx=%u ok=%d (end=%u)\n",
+	// 			j, page_iter, entry_idx, (int)page_ok, cur_page_indptr_end);
+	// 	}
+
+	// 	if(page_ok) {
+	// 		// layout == QKVLayout::kNHD
+	// 		// protective_get_k_ptr
+	// 		h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
+	// 			((__ldg(paged_hadamard.indices + page_iter) * paged_hadamard.page_size + entry_idx) * paged_hadamard.num_heads + h_head_idx) * paged_hadamard.head_dim;
+	// 	} else {
+	// 		h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data;
+	// 	}
+	// }
 	block.sync();
 
-	if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
-		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
-		printf("Checkpoint 1: after preload h_ptrs_smem\n");
-	}
+	// if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+	// 	&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+	// 	printf("Checkpoint 1: after preload h_ptrs_smem\n");
+	// }
 
 	DTypeIn* h_ptrs[tile_size_per_bdx];
 #pragma unroll
@@ -410,72 +410,51 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 				h_ptrs_smem[((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j] + tx * vec_size;
 		}
 #pragma unroll
-		// for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
-		// 	cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
-		// 		h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
-		// 			tx * vec_size,
-		// 		h_ptrs[j],
-		// 		((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j < h_chunk_len);
-		// }
 		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
-			// 计算对应 page_iter，复用相同判定
-            uint32_t page_iter = cur_page_indptr_begin +
-                (((/*iter0*/ 0 * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
-            bool page_ok = (page_iter < cur_page_indptr_end);
-
-			bool pred_ok = (((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) < h_chunk_len && page_ok;
-
 			cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
 				h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
 					tx * vec_size,
 				h_ptrs[j],
-				pred_ok);
+				((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j < h_chunk_len);
 		}
+		// for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+		// 	// 计算对应 page_iter，复用相同判定
+        //     uint32_t page_iter = cur_page_indptr_begin +
+        //         (((/*iter0*/ 0 * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
+        //     bool page_ok = (page_iter < cur_page_indptr_end);
+
+		// 	bool pred_ok = (((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) < h_chunk_len && page_ok;
+
+		// 	cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
+		// 		h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
+		// 			tx * vec_size,
+		// 		h_ptrs[j],
+		// 		pred_ok);
+		// }
 		cp_async::commit_group();
 		stage_idx = (stage_idx + 1) % num_stages_smem;
 	}
 
-	if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
-		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
-		printf("Checkpoint 2: after initial loads\n");
-	}
+	// if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+	// 	&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+	// 	printf("Checkpoint 2: after initial loads\n");
+	// }
 
-// #pragma unroll 2
-// 	for(uint32_t iter = 0; iter < ceil_div(h_chunk_len, tile_size_per_bdx * bdy * bdz); ++iter) {
-// 		if((iter + num_stages_smem) % bdx == 0) {
-// #pragma unroll
-// 			for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
-// 				// page_storage == PageStorage::kIndices
-// 				uint32_t page_iter = cur_page_indptr_begin +
-// 									((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
-// 									((j * bdz + tz) * bdy + ty) * bdx + tx) /
-// 										paged_hadamard.page_size;
-// 				uint32_t entry_idx = ((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
-// 									((j * bdz + tz) * bdy + ty) * bdx + tx) %
-// 									paged_hadamard.page_size;
-									
-// 				if(page_iter < last_indptr) {
-// 					// layout == QKVLayout::kNHD
-// 					// protective_get_k_ptr
-// 					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
-// 						((__ldg(paged_hadamard.indices + page_iter) * paged_hadamard.page_size + entry_idx) * paged_hadamard.num_heads + h_head_idx) * paged_hadamard.head_dim;
-// 				} else {
-// 					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data;
-// 				}
-// 			}
-// 		}
 #pragma unroll 2
 	for(uint32_t iter = 0; iter < ceil_div(h_chunk_len, tile_size_per_bdx * bdy * bdz); ++iter) {
 		if((iter + num_stages_smem) % bdx == 0) {
 #pragma unroll
 			for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
-				uint32_t linear = (iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz
-                                 + ((j * bdz + tz) * bdy + ty) * bdx + tx;
-                uint32_t page_iter = cur_page_indptr_begin + linear / paged_hadamard.page_size;
-                uint32_t entry_idx = linear % paged_hadamard.page_size;
-                bool page_ok = (page_iter < cur_page_indptr_end);
+				// page_storage == PageStorage::kIndices
+				uint32_t page_iter = cur_page_indptr_begin +
+									((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
+									((j * bdz + tz) * bdy + ty) * bdx + tx) /
+										paged_hadamard.page_size;
+				uint32_t entry_idx = ((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
+									((j * bdz + tz) * bdy + ty) * bdx + tx) %
+									paged_hadamard.page_size;
 									
-				if(page_ok) {
+				if(page_iter < last_indptr) {
 					// layout == QKVLayout::kNHD
 					// protective_get_k_ptr
 					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
@@ -485,11 +464,32 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 				}
 			}
 		}
+// #pragma unroll 2
+// 	for(uint32_t iter = 0; iter < ceil_div(h_chunk_len, tile_size_per_bdx * bdy * bdz); ++iter) {
+// 		if((iter + num_stages_smem) % bdx == 0) {
+// #pragma unroll
+// 			for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+// 				uint32_t linear = (iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz
+//                                  + ((j * bdz + tz) * bdy + ty) * bdx + tx;
+//                 uint32_t page_iter = cur_page_indptr_begin + linear / paged_hadamard.page_size;
+//                 uint32_t entry_idx = linear % paged_hadamard.page_size;
+//                 bool page_ok = (page_iter < cur_page_indptr_end);
+									
+// 				if(page_ok) {
+// 					// layout == QKVLayout::kNHD
+// 					// protective_get_k_ptr
+// 					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data + 
+// 						((__ldg(paged_hadamard.indices + page_iter) * paged_hadamard.page_size + entry_idx) * paged_hadamard.num_heads + h_head_idx) * paged_hadamard.head_dim;
+// 				} else {
+// 					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data;
+// 				}
+// 			}
+// 		}
 
-		if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
-		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
-			printf("Checkpoint 3: iter=%u\n", iter);
-		}
+		// if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+		// && threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+		// 	printf("Checkpoint 3: iter=%u\n", iter);
+		// }
 		// compute manhatton distances
 		cp_async::wait_group<num_stages_smem - 1>();
 		block.sync();
@@ -503,10 +503,10 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 					h_chunk_len); // Note that o is [num_heads, h_chunk_len]. Exclude last page.
 		block.sync();
 
-		if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
-		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
-			printf("Checkpoint 4: after compute iter=%u\n", iter);
-		}
+		// if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+		// && threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+		// 	printf("Checkpoint 4: after compute iter=%u\n", iter);
+		// }
 
 #pragma unroll
 		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
@@ -516,33 +516,33 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 						tx * vec_size;
 		}
 		// load h tiles
-// #pragma unroll
-// 		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
-// 			cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
-// 				h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
-// 					tx * vec_size,
-// 				h_ptrs[j],
-// 				(((iter + num_stages_smem) * bdz + tz) * bdy + ty) * tile_size_per_bdx + j <
-// 					h_chunk_len);
-// 		}
 #pragma unroll
 		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
-			uint32_t linear = ((iter + num_stages_smem) * bdz + tz) * bdy + ty;
-            linear = linear * tile_size_per_bdx + j;
-            bool pred_ok = (linear < h_chunk_len);
 			cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
 				h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
 					tx * vec_size,
 				h_ptrs[j],
-				pred_ok);
+				(((iter + num_stages_smem) * bdz + tz) * bdy + ty) * tile_size_per_bdx + j <
+					h_chunk_len);
 		}
+// #pragma unroll
+// 		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+// 			uint32_t linear = ((iter + num_stages_smem) * bdz + tz) * bdy + ty;
+//             linear = linear * tile_size_per_bdx + j;
+//             bool pred_ok = (linear < h_chunk_len);
+// 			cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
+// 				h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) * head_dim +
+// 					tx * vec_size,
+// 				h_ptrs[j],
+// 				pred_ok);
+// 		}
 		cp_async::commit_group();
 		stage_idx = (stage_idx + 1) % num_stages_smem;
 
-		if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
-		&& threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
-			printf("Checkpoint 5: end of iter=%u\n", iter);	
-		}
+		// if (blockIdx.x == 0 && (blockIdx.y == 28 || blockIdx.y == 30)
+		// && threadIdx.x == 0 && threadIdx.y == 0 && (threadIdx.z == 6 || threadIdx.z == 3)) {
+		// 	printf("Checkpoint 5: end of iter=%u\n", iter);	
+		// }
 	}
 	cp_async::wait_group<0>();
 }
@@ -943,8 +943,8 @@ cudaError_t PartitionPagedKVCacheComputeAuxiliaryInfo(const uint32_t max_num_pag
 								1); // +1 for consistent kv_chunk_len calculation
 	batch_idx_map_h.push_back(0); // 0 since we only support bsz = 1
 
-	printf("[AUX] sizes: new_indptr=%zu (new_bsz+1) chunk_indptr=%zu (old_bsz+1) batch_idx_map=%zu (new_bsz)\n",
-           new_page_indptr_h.size(), chunk_indptr_h.size(), batch_idx_map_h.size());
+	// printf("[AUX] sizes: new_indptr=%zu (new_bsz+1) chunk_indptr=%zu (old_bsz+1) batch_idx_map=%zu (new_bsz)\n",
+    //        new_page_indptr_h.size(), chunk_indptr_h.size(), batch_idx_map_h.size());
 
 	FLASHINFER_CUDA_CALL(cudaMemcpyAsync(new_indptr_d,
 										 new_page_indptr_h.data(),
@@ -1217,88 +1217,88 @@ BatchDecodeWithPagedKVCacheDispatched(DTypeIn* q,
 		dim3 nblks(batch_size, num_kv_heads);
 		dim3 nthrs(bdx, bdy, bdz);
 		
-		// ...existing code...
-        // ============== DEBUG (safe) START ==============
-        printf("[DEBUG] Launching partition_kv_kernel on stream %p\n", stream);
-        printf("[DEBUG] Grid: (%u, %u, %u), Block: (%u, %u, %u)\n",
-               nblks.x, nblks.y, nblks.z, nthrs.x, nthrs.y, nthrs.z);
-        printf("[DEBUG] smem_size: %u\n", smem_size);
-        printf("[DEBUG] Pointers: q=%p, o=%p, tmp=%p, lse=%p\n", q, o, tmp, lse);
+// 		// ...existing code...
+//         // ============== DEBUG (safe) START ==============
+//         printf("[DEBUG] Launching partition_kv_kernel on stream %p\n", stream);
+//         printf("[DEBUG] Grid: (%u, %u, %u), Block: (%u, %u, %u)\n",
+//                nblks.x, nblks.y, nblks.z, nthrs.x, nthrs.y, nthrs.z);
+//         printf("[DEBUG] smem_size: %u\n", smem_size);
+//         printf("[DEBUG] Pointers: q=%p, o=%p, tmp=%p, lse=%p\n", q, o, tmp, lse);
 
-        printf("[DEBUG] paged_kv: data=%p indices=%p indptr=%p bsz=%u nheads=%u hdim=%u page=%u\n",
-               paged_kv.data, paged_kv.indices, paged_kv.indptr,
-               paged_kv.batch_size, paged_kv.num_heads, paged_kv.head_dim, paged_kv.page_size);
-        printf("[DEBUG] kv_partition_info: chunk_indptr=%p batch_idx_map=%p bsz_before=%u\n",
-               kv_partition_info.chunk_indptr, kv_partition_info.batch_idx_map,
-               kv_partition_info.batch_size_before_partition);
+//         printf("[DEBUG] paged_kv: data=%p indices=%p indptr=%p bsz=%u nheads=%u hdim=%u page=%u\n",
+//                paged_kv.data, paged_kv.indices, paged_kv.indptr,
+//                paged_kv.batch_size, paged_kv.num_heads, paged_kv.head_dim, paged_kv.page_size);
+//         printf("[DEBUG] kv_partition_info: chunk_indptr=%p batch_idx_map=%p bsz_before=%u\n",
+//                kv_partition_info.chunk_indptr, kv_partition_info.batch_idx_map,
+//                kv_partition_info.batch_size_before_partition);
 
-        if (paged_kv.data == nullptr || paged_kv.indptr == nullptr ||
-            (page_storage == PageStorage::kIndices && paged_kv.indices == nullptr) ||
-            paged_kv.batch_size == 0 || paged_kv.num_heads == 0 || paged_kv.head_dim == 0) {
-            fprintf(stderr, "[ERR] Invalid paged_kv arguments. Abort launch.\n");
-            return cudaErrorInvalidValue;
-        }
-        if (kv_partition_info.chunk_indptr == nullptr || kv_partition_info.batch_idx_map == nullptr) {
-            fprintf(stderr, "[ERR] Invalid kv_partition_info. Abort launch.\n");
-            return cudaErrorInvalidValue;
-        }
+//         if (paged_kv.data == nullptr || paged_kv.indptr == nullptr ||
+//             (page_storage == PageStorage::kIndices && paged_kv.indices == nullptr) ||
+//             paged_kv.batch_size == 0 || paged_kv.num_heads == 0 || paged_kv.head_dim == 0) {
+//             fprintf(stderr, "[ERR] Invalid paged_kv arguments. Abort launch.\n");
+//             return cudaErrorInvalidValue;
+//         }
+//         if (kv_partition_info.chunk_indptr == nullptr || kv_partition_info.batch_idx_map == nullptr) {
+//             fprintf(stderr, "[ERR] Invalid kv_partition_info. Abort launch.\n");
+//             return cudaErrorInvalidValue;
+//         }
 
-        // 段间距一致性检查：int_buffer_ 中布局应为 [new_indptr | chunk_indptr | batch_idx_map]
-        {
-            using UId = IdType;
-            const uint32_t new_bsz = paged_kv.batch_size;                   // after partition
-            const uint32_t old_bsz = kv_partition_info.batch_size_before_partition;
-            const size_t expect_indptr_bytes = sizeof(UId) * (new_bsz + 1);
-            const size_t expect_chunk_bytes  = sizeof(UId) * (old_bsz + 1);
-            const size_t expect_map_bytes    = sizeof(UId) * (new_bsz);
+//         // 段间距一致性检查：int_buffer_ 中布局应为 [new_indptr | chunk_indptr | batch_idx_map]
+//         {
+//             using UId = IdType;
+//             const uint32_t new_bsz = paged_kv.batch_size;                   // after partition
+//             const uint32_t old_bsz = kv_partition_info.batch_size_before_partition;
+//             const size_t expect_indptr_bytes = sizeof(UId) * (new_bsz + 1);
+//             const size_t expect_chunk_bytes  = sizeof(UId) * (old_bsz + 1);
+//             const size_t expect_map_bytes    = sizeof(UId) * (new_bsz);
 
-            auto up_indptr   = reinterpret_cast<uintptr_t>(paged_kv.indptr);
-            auto up_chunk    = reinterpret_cast<uintptr_t>(kv_partition_info.chunk_indptr);
-            auto up_map      = reinterpret_cast<uintptr_t>(kv_partition_info.batch_idx_map);
+//             auto up_indptr   = reinterpret_cast<uintptr_t>(paged_kv.indptr);
+//             auto up_chunk    = reinterpret_cast<uintptr_t>(kv_partition_info.chunk_indptr);
+//             auto up_map      = reinterpret_cast<uintptr_t>(kv_partition_info.batch_idx_map);
 
-            printf("[CHK] new_bsz=%u old_bsz=%u expect: indptr=%zuB chunk=%zuB map=%zuB\n",
-                   new_bsz, old_bsz, expect_indptr_bytes, expect_chunk_bytes, expect_map_bytes);
-            printf("[CHK] addr: indptr=%p chunk=%p map=%p\n",
-                   paged_kv.indptr, kv_partition_info.chunk_indptr, kv_partition_info.batch_idx_map);
+//             printf("[CHK] new_bsz=%u old_bsz=%u expect: indptr=%zuB chunk=%zuB map=%zuB\n",
+//                    new_bsz, old_bsz, expect_indptr_bytes, expect_chunk_bytes, expect_map_bytes);
+//             printf("[CHK] addr: indptr=%p chunk=%p map=%p\n",
+//                    paged_kv.indptr, kv_partition_info.chunk_indptr, kv_partition_info.batch_idx_map);
 
-            if (!(up_chunk >= up_indptr + expect_indptr_bytes)) {
-                fprintf(stderr, "[ERR] chunk_indptr overlaps new_indptr: gap=%zu (<%zu)\n",
-                        static_cast<size_t>(up_chunk - up_indptr), expect_indptr_bytes);
-                return cudaErrorInvalidValue;
-            }
-            if (!(up_map >= up_chunk + expect_chunk_bytes)) {
-                fprintf(stderr, "[ERR] batch_idx_map overlaps chunk_indptr: gap=%zu (<%zu)\n",
-                        static_cast<size_t>(up_map - up_chunk), expect_chunk_bytes);
-                return cudaErrorInvalidValue;
-            }
+//             if (!(up_chunk >= up_indptr + expect_indptr_bytes)) {
+//                 fprintf(stderr, "[ERR] chunk_indptr overlaps new_indptr: gap=%zu (<%zu)\n",
+//                         static_cast<size_t>(up_chunk - up_indptr), expect_indptr_bytes);
+//                 return cudaErrorInvalidValue;
+//             }
+//             if (!(up_map >= up_chunk + expect_chunk_bytes)) {
+//                 fprintf(stderr, "[ERR] batch_idx_map overlaps chunk_indptr: gap=%zu (<%zu)\n",
+//                         static_cast<size_t>(up_map - up_chunk), expect_chunk_bytes);
+//                 return cudaErrorInvalidValue;
+//             }
 
-            // 抽样把 indptr[0], indptr[1], indptr[new_bsz] 和 map[0] 读回主机检查
-            UId h_indptr0 = 0, h_indptr1 = 0, h_last = 0, h_map0 = 0;
-            cudaError_t ce;
-            ce = cudaMemcpy(&h_indptr0, paged_kv.indptr + 0, sizeof(UId), cudaMemcpyDeviceToHost);
-            if (ce != cudaSuccess) fprintf(stderr, "[ERR] memcpy indptr[0] fail: %s\n", cudaGetErrorString(ce));
-            ce = cudaMemcpy(&h_indptr1, paged_kv.indptr + 1, sizeof(UId), cudaMemcpyDeviceToHost);
-            if (ce != cudaSuccess) fprintf(stderr, "[ERR] memcpy indptr[1] fail: %s\n", cudaGetErrorString(ce));
-            ce = cudaMemcpy(&h_last, paged_kv.indptr + new_bsz, sizeof(UId), cudaMemcpyDeviceToHost);
-            if (ce != cudaSuccess) fprintf(stderr, "[ERR] memcpy indptr[last] fail: %s\n", cudaGetErrorString(ce));
-            ce = cudaMemcpy(&h_map0, kv_partition_info.batch_idx_map + 0, sizeof(UId), cudaMemcpyDeviceToHost);
-            if (ce != cudaSuccess) fprintf(stderr, "[ERR] memcpy map[0] fail: %s\n", cudaGetErrorString(ce));
-            printf("[CHK] indptr[0]=%u indptr[1]=%u indptr[last]=%u map[0]=%u\n",
-                   (unsigned)h_indptr0, (unsigned)h_indptr1, (unsigned)h_last, (unsigned)h_map0);
+//             // 抽样把 indptr[0], indptr[1], indptr[new_bsz] 和 map[0] 读回主机检查
+//             UId h_indptr0 = 0, h_indptr1 = 0, h_last = 0, h_map0 = 0;
+//             cudaError_t ce;
+//             ce = cudaMemcpy(&h_indptr0, paged_kv.indptr + 0, sizeof(UId), cudaMemcpyDeviceToHost);
+//             if (ce != cudaSuccess) fprintf(stderr, "[ERR] memcpy indptr[0] fail: %s\n", cudaGetErrorString(ce));
+//             ce = cudaMemcpy(&h_indptr1, paged_kv.indptr + 1, sizeof(UId), cudaMemcpyDeviceToHost);
+//             if (ce != cudaSuccess) fprintf(stderr, "[ERR] memcpy indptr[1] fail: %s\n", cudaGetErrorString(ce));
+//             ce = cudaMemcpy(&h_last, paged_kv.indptr + new_bsz, sizeof(UId), cudaMemcpyDeviceToHost);
+//             if (ce != cudaSuccess) fprintf(stderr, "[ERR] memcpy indptr[last] fail: %s\n", cudaGetErrorString(ce));
+//             ce = cudaMemcpy(&h_map0, kv_partition_info.batch_idx_map + 0, sizeof(UId), cudaMemcpyDeviceToHost);
+//             if (ce != cudaSuccess) fprintf(stderr, "[ERR] memcpy map[0] fail: %s\n", cudaGetErrorString(ce));
+//             printf("[CHK] indptr[0]=%u indptr[1]=%u indptr[last]=%u map[0]=%u\n",
+//                    (unsigned)h_indptr0, (unsigned)h_indptr1, (unsigned)h_last, (unsigned)h_map0);
 
-            if (h_indptr0 > h_indptr1 || h_indptr1 > h_last) {
-                fprintf(stderr, "[ERR] indptr not non-decreasing: %u %u %u\n",
-                        (unsigned)h_indptr0, (unsigned)h_indptr1, (unsigned)h_last);
-                return cudaErrorInvalidValue;
-            }
-        }
+//             if (h_indptr0 > h_indptr1 || h_indptr1 > h_last) {
+//                 fprintf(stderr, "[ERR] indptr not non-decreasing: %u %u %u\n",
+//                         (unsigned)h_indptr0, (unsigned)h_indptr1, (unsigned)h_last);
+//                 return cudaErrorInvalidValue;
+//             }
+//         }
 
-        if ((reinterpret_cast<uintptr_t>(paged_kv.data) % 16) != 0) {
-            fprintf(stderr, "[WARN] paged_kv.data is not 16B aligned; potential cp.async issues.\n");
-        }
-        (void)cudaGetLastError();
-        // =============== DEBUG (safe) END ===============
-// ...existing code...
+//         if ((reinterpret_cast<uintptr_t>(paged_kv.data) % 16) != 0) {
+//             fprintf(stderr, "[WARN] paged_kv.data is not 16B aligned; potential cp.async issues.\n");
+//         }
+//         (void)cudaGetLastError();
+//         // =============== DEBUG (safe) END ===============
+// // ...existing code...
 
 
 		FLASHINFER_CUDA_CALL(

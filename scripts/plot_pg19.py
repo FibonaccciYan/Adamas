@@ -60,13 +60,13 @@ for i, (token_budget, ax) in enumerate(zip(token_budgets, axes)):
     # ==== Plot ====
     max_len = min(32000, len(ppl_curve_HSA), len(ppl_curve_Quest))
 
-    ax.plot(range(1, max_len + 1), ppl_curve_HSA[:max_len].numpy(), label="HSA", color="#d62728")
-    ax.plot(range(1, max_len + 1), ppl_curve_Quest[:max_len].numpy(), label="Quest", color="#1f77b4")
     ax.plot(range(1, max_len + 1), ppl_curve_streamingLLM[:max_len].numpy(), label="StreamingLLM", color="#ff7f0e")
+    ax.plot(range(1, max_len + 1), ppl_curve_Quest[:max_len].numpy(), label="Quest", color="#1f77b4")
+    ax.plot(range(1, max_len + 1), ppl_curve_HSA[:max_len].numpy(), label="HSA", color="#d62728")
     ax.plot(range(1, max_len + 1), ppl_curve_full[:max_len].numpy(), label="Full Attn", color="#2ca02c")
     ax.set_xlabel("Sequence Length")
     ax.set_ylabel("Perplexity (PPL)")
-    ax.set_title(f"token budget={token_budget}")
+    ax.set_title(f"Token budget: {token_budget}")
     ax.set_ylim(6.5, y_upper_lims[i])
     ax.grid(True)
 
