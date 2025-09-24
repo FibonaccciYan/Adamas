@@ -14,7 +14,7 @@ from evaluation.llama import enable_tuple_kv_cache_for_llama
 # from evaluation.mistral import enable_tuple_kv_cache_for_mistral
 
 from evaluation.hadamard_attention import enable_hadamard_dynamic_cache_for_llama
-from evaluation.hadamard_cache import HadamardDynamicCache
+from Adamas.evaluation.adamas_cache import HadamardDynamicCache
 
 # from https://github.com/epfml/landmark-attention/blob/main/llama/run_test.py
 

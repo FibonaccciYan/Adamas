@@ -137,7 +137,7 @@ def flash_attention_forward(
         return attn_output, attn_weights, past_key_value
 
 
-def hadamard_forward(
+def adamas_forward(
     self,
     hidden_states: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -382,14 +382,14 @@ global layer_id
 layer_id = 32
 
 
-def enable_hadamard_dynamic_cache_for_llama():
+def enable_adamas_dynamic_cache_for_llama():
     transformers.models.llama.modeling_llama.LlamaFlashAttention2.forward = flash_attention_forward
 
 
-def enable_hadamard_attention_eval(model, args):
+def enable_adamas_attention_eval(model, args):
     for name, module in reversed(model._modules.items()):
         if len(list(module.children())) > 0:
-            enable_hadamard_attention_eval(
+            enable_adamas_attention_eval(
                 module,
                 args,
             )

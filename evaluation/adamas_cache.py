@@ -4,7 +4,7 @@ from transformers.cache_utils import Cache
 from typing import List, Tuple, Dict, Any, Optional
 
 
-class HadamardDynamicCache(Cache):
+class AdamasDynamicCache(Cache):
     """
     A cache that grows dynamically as more tokens are generated. This is the default for generative models.
 
@@ -105,7 +105,7 @@ class HadamardDynamicCache(Cache):
         return legacy_cache
 
     @classmethod
-    def from_legacy_cache(cls, past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None) -> "HadamardDynamicCache":
+    def from_legacy_cache(cls, past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None) -> "AdamasDynamicCache":
         """Converts a cache in the legacy cache format into an equivalent `DynamicCache`. Used for
         backward compatibility."""
         cache = cls()
@@ -132,12 +132,12 @@ class HadamardDynamicCache(Cache):
             self.value_cache[idx] = self.value_cache[idx][..., :max_length, :]
             self.hadamard_key_cache[idx] = self.hadamard_key_cache[idx][..., :max_length, :]
 
-    def batch_split(self, full_batch_size: int, split_size: int) -> List["HadamardDynamicCache"]:
+    def batch_split(self, full_batch_size: int, split_size: int) -> List["AdamasDynamicCache"]:
         """Split the current instance into a list of `HadamardDynamicCache` by the batch size. This will be used by
         `_split_model_inputs()` in `generation.utils`"""
         out = []
         for i in range(0, full_batch_size, split_size):
-            current_split = HadamardDynamicCache()
+            current_split = AdamasDynamicCache()
             current_split._seen_tokens = self._seen_tokens
             current_split.key_cache = [tensor[i : i + split_size] for tensor in self.key_cache]
             current_split.value_cache = [tensor[i : i + split_size] for tensor in self.value_cache]
@@ -146,7 +146,7 @@ class HadamardDynamicCache(Cache):
         return out
 
     @classmethod
-    def from_batch_splits(cls, splits: List["HadamardDynamicCache"]) -> "HadamardDynamicCache":
+    def from_batch_splits(cls, splits: List["AdamasDynamicCache"]) -> "AdamasDynamicCache":
         """This is the opposite of the above `batch_split()` method. This will be used by `stack_model_outputs` in
         `generation.utils`"""
         cache = cls()
