@@ -19,8 +19,7 @@ class ModelConfig:
 MODEL_CFGS = {
     "llama2-7b":
         ModelConfig(
-            # model_path="/data1/model/llama2/meta-llama/Llama-2-7b-chat-hf"
-            model_path="/data0/ysy/models/lmsys/longchat-7b-v1.5-32k"
+            model_path="/path/to/lmsys/longchat-7b-v1.5-32k"
         ),
 }
 

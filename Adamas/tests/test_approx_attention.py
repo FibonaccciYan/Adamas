@@ -61,8 +61,8 @@ def _ref_self_approx_attention(
 
     if kv_len > token_budget:
         thresholds = torch.tensor([-10, 0, 10]).to(q.device)
-        q_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(q), thresholds, out_int32=True)
-        k_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k), thresholds, out_int32=True)
+        q_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(q, inplace=False), thresholds, out_int32=True)
+        k_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k, inplace=False), thresholds, out_int32=True)
         approx_attn = nn.functional.pairwise_distance(
             q_code,
             k_code, 
@@ -135,7 +135,7 @@ def test_approx_attention_correctness(dtype_str, qo_len, kv_len, token_budget):
         device,
     )
 
-    k_prefill_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k_prefill), testController.thresholds, out_int32=True)
+    k_prefill_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k_prefill, inplace=False), testController.thresholds, out_int32=True)
     k_prefill_code_2bit = pack_2bit(k_prefill_code, k_prefill_code.dtype)
 
     # Begin: Fill in prefill kv-data
@@ -148,7 +148,7 @@ def test_approx_attention_correctness(dtype_str, qo_len, kv_len, token_budget):
     k_decode = torch.randn(1, num_heads, head_dim, dtype=dtype, device=device)
     v_decode = torch.randn(1, num_heads, head_dim, dtype=dtype, device=device)
 
-    k_decode_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k_decode),   testController.thresholds, out_int32=True)
+    k_decode_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k_decode, inplace=False),   testController.thresholds, out_int32=True)
     k_decode_code_2bit = pack_2bit(k_decode_code, k_decode_code.dtype)
 
     # CPU Evaluation

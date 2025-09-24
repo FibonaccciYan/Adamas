@@ -2,8 +2,7 @@ from transformers import AutoTokenizer
 import torch
 import argparse
 
-# MODEL_PATH = "/data1/model/llama2/meta-llama/Llama-2-7b-chat-hf"
-MODEL_PATH = "/data1/ysy/model/lmsys/longchat-7b-v1.5-32k"
+MODEL_PATH = "/path/to/lmsys/longchat-7b-v1.5-32k"
 DEVICE = torch.device("cuda:0")
 DTYPE = torch.float16
 torch.set_default_dtype(DTYPE)
@@ -30,8 +29,7 @@ else:
     model = LlamaForCausalLM.from_pretrained(MODEL_PATH, device_map=DEVICE, torch_dtype=DTYPE)
     
 # First Round
-# prompt = "In an animal kingdom, the lion is the king. One day, the lion announces a competition to choose the most hardworking animal. The turtle, rabbit, monkey, zebra, and giraffe all decide to participate. After a day of observation, the lion notices that all the animals are working hard, except for the rabbit, who is sleeping. So why does the lion choose the rabbit as the most hardworking animal?"
-prompt = "Where did yellowstone national park get its name?"
+prompt = "In an animal kingdom, the lion is the king. One day, the lion announces a competition to choose the most hardworking animal. The turtle, rabbit, monkey, zebra, and giraffe all decide to participate. After a day of observation, the lion notices that all the animals are working hard, except for the rabbit, who is sleeping. So why does the lion choose the rabbit as the most hardworking animal?"
 
 if "longchat" in MODEL_PATH or "vicuna" in MODEL_PATH:
     from fastchat.model import get_conversation_template

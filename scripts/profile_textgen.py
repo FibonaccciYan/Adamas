@@ -27,7 +27,7 @@ class ModelConfig:
 MODEL_CFGS = {
     "llama2-7b":
         ModelConfig(
-            model_path="/data1/model/llama2/meta-llama/Llama-2-7b-chat-hf"
+            model_path="/path/to/llama2/meta-llama/Llama-2-7b-chat-hf"
         ),
 }
 
@@ -77,24 +77,6 @@ def benchmark_Adamas():
     )
     hidden_size = model._config.hidden_size
 
-    # # warmup
-    # # clear cuda cache
-    # torch.cuda.empty_cache()
-
-    # # Prefill Stage
-    # hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
-    # model(
-    #     inputs_embeds=hidden_states,
-    # )
-    # # Start decoding decode_len tokens
-    # for _ in range(decode_len):
-    #     hidden_states = torch.randn(1, 1, hidden_size, dtype=dtype, device=device)
-    #     model(
-    #         inputs_embeds=hidden_states,
-    #     )
-    
-    # model.Adamas_clear()
-
     prefill_latency = []
     decode_latency = []
 
@@ -132,8 +114,6 @@ def benchmark_Adamas():
 
     print("page_size,token_budget,context_len,decode_len,avg_prefill_latency,avg_decode_latency")
     print(f"{page_size},{token_budget},{context_len},{decode_len},{avg_prefill_latency},{avg_decode_latency}")
-
-    # print(prof.key_averages().table(sort_by="cuda_time_total"))
 
 if __name__ == "__main__":
     benchmark_Adamas()

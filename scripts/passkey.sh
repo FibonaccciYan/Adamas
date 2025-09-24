@@ -1,9 +1,9 @@
 cd evaluation/passkey
 
 # MODEL=longchat-7b-v1.5-32k
-# MODELPATH=/data0/ysy/models/lmsys/longchat-7b-v1.5-32k
+# MODELPATH=/path/to/lmsys/longchat-7b-v1.5-32k
 MODEL=Yarn-Llama-2-7b-128k
-MODELPATH=/data0/ysy/models/NousResearch/Yarn-Llama-2-7b-128k
+MODELPATH=/path/to/NousResearch/Yarn-Llama-2-7b-128k
 OUTPUT_DIR=results/$MODEL
 
 mkdir -p $OUTPUT_DIR

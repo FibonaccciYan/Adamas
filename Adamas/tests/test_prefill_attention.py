@@ -96,7 +96,7 @@ def test_prefill_attention_correctness(dtype_str, qo_len, kv_len):
         device,
     )
 
-    k_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k),   testController.thresholds, out_int32=True)
+    k_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k, inplace=False),   testController.thresholds, out_int32=True)
     k_code_2bit = pack_2bit(k_code, k_code.dtype)
 
     # Begin (prepare kv-cache hadamard data)

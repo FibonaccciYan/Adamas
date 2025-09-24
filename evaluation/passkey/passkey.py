@@ -13,8 +13,8 @@ from tqdm.contrib import tenumerate
 from evaluation.llama import enable_tuple_kv_cache_for_llama
 # from evaluation.mistral import enable_tuple_kv_cache_for_mistral
 
-from evaluation.hadamard_attention import enable_hadamard_dynamic_cache_for_llama
-from Adamas.evaluation.adamas_cache import HadamardDynamicCache
+from evaluation.adamas_attention import enable_adamas_dynamic_cache_for_llama
+from evaluation.adamas_cache import AdamasDynamicCache
 
 # from https://github.com/epfml/landmark-attention/blob/main/llama/run_test.py
 
@@ -186,11 +186,11 @@ def main(args):
 
         if args.Adamas:
             print("Enable hadamard attention")
-            from evaluation.hadamard_attention import (
-                enable_hadamard_attention_eval,
+            from evaluation.adamas_attention import (
+                enable_adamas_attention_eval,
             )
 
-            enable_hadamard_attention_eval(loaded, args)
+            enable_adamas_attention_eval(loaded, args)
 
         pipe = pipeline(
             "text-generation",

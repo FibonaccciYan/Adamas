@@ -11,7 +11,7 @@ do
     do
         python -u pred.py \
             --model $model --task $task \
-            --Adamas --token_budget $budget --chunk_size 16
+            --Adamas --token_budget $budget --chunk_size 1
     done
 done
 

@@ -13,9 +13,9 @@ from tqdm import tqdm
 import numpy as np
 import random
 import argparse
-from evaluation.quest_attention import enable_quest_attention_eval
+from evaluation.adamas_attention import enable_adamas_attention_eval
 from evaluation.llama import enable_tuple_kv_cache_for_llama 
-from evaluation.mistral import enable_tuple_kv_cache_for_mistral
+# from evaluation.mistral import enable_tuple_kv_cache_for_mistral
 
 
 def parse_args(args=None):
@@ -43,7 +43,7 @@ def parse_args(args=None):
 
     parser.add_argument("--token_budget", type=int, default=None)
     parser.add_argument("--chunk_size", type=int, default=None)
-    parser.add_argument("--quest", action="store_true", help="Enable Quest Attention")
+    parser.add_argument("--Adamas", action="store_true", help="Enable Adamas Attention")
 
     return parser.parse_args(args)
 
@@ -235,8 +235,8 @@ def seed_everything(seed):
 def load_model_and_tokenizer(path, model_name, device):
     if 'llama' in model_name.lower() or 'longchat' in model_name.lower():
         enable_tuple_kv_cache_for_llama()
-    if 'mistral' in model_name.lower():
-        enable_tuple_kv_cache_for_mistral()
+    # if 'mistral' in model_name.lower():
+    #     enable_tuple_kv_cache_for_mistral()
         
     tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
@@ -244,8 +244,8 @@ def load_model_and_tokenizer(path, model_name, device):
     )
     model = model.eval()
 
-    if args.quest:
-        enable_quest_attention_eval(model, args)
+    if args.Adamas:
+        enable_adamas_attention_eval(model, args)
 
     return model, tokenizer
 
@@ -294,7 +294,7 @@ if __name__ == "__main__":
             if not os.path.exists(f"pred_e/{model_name}"):
                 os.makedirs(f"pred_e/{model_name}")
             out_path = f"pred_e/{model_name}/{dataset}.jsonl"
-            if args.quest:
+            if args.Adamas:
                 out_path = f"pred_e/{model_name}/{dataset}-{args.token_budget}.jsonl"
             else:
                 out_path = f"pred_e/{model_name}/{dataset}-full.jsonl"
@@ -302,7 +302,7 @@ if __name__ == "__main__":
             data = load_dataset("THUDM/LongBench", dataset, split="test")
             if not os.path.exists(f"pred/{model_name}"):
                 os.makedirs(f"pred/{model_name}")
-            if args.quest:
+            if args.Adamas:
                 out_path = f"pred/{model_name}/{dataset}-{args.token_budget}.jsonl"
             else:
                 out_path = f"pred/{model_name}/{dataset}-full.jsonl"

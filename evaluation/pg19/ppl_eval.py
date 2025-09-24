@@ -63,11 +63,11 @@ past_key_values = None
 
 if args.Adamas:
     print("Enable Adamas attention")
-    from evaluation.hadamard_attention import (
-        enable_hadamard_attention_eval,
+    from evaluation.adamas_attention import (
+        enable_adamas_attention_eval,
     )
 
-    enable_hadamard_attention_eval(model, args)
+    enable_adamas_attention_eval(model, args)
 
 os.makedirs(args.output_dir, exist_ok=True)
 f = open(f"{args.output_dir}/log_Adamas_{args.token_budget}.txt", "w")
