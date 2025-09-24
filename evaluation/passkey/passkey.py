@@ -184,7 +184,7 @@ def main(args):
             low_cpu_mem_usage=True,
         )
 
-        if args.HSA:
+        if args.Adamas:
             print("Enable hadamard attention")
             from evaluation.hadamard_attention import (
                 enable_hadamard_attention_eval,
@@ -266,7 +266,7 @@ if __name__ == "__main__":
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--output-file", type=str)
 
-    parser.add_argument("--HSA", action="store_true", help="Enable hadamard attention")
+    parser.add_argument("--Adamas", action="store_true", help="Enable hadamard attention")
     parser.add_argument("--token_budget", type=int, default=1024)
     parser.add_argument("--chunk_size", type=int, default=16)
     main(add_args(parser).parse_args())

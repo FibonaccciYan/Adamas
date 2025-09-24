@@ -9,7 +9,7 @@ import torch
 from torch.profiler import profile, record_function, ProfilerActivity
 from tqdm.auto import tqdm
 
-from HSA import LlamaForCausalLM
+from Adamas import LlamaForCausalLM
 
 schedule = torch.profiler.schedule(
     wait=128,
@@ -45,7 +45,7 @@ def load_model(model_cfg: ModelConfig):
     return model
 
 @torch.inference_mode()
-def benchmark_hsa():
+def benchmark_Adamas():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=MODEL_CFGS.keys(), default="llama2-7b")
     parser.add_argument("--context_len", type=int, default=2*1024)
@@ -68,7 +68,7 @@ def benchmark_hsa():
     
     dtype = getattr(torch, model_cfg.dtype)
     device = torch.device(model_cfg.device)
-    model.hsa_init(
+    model.Adamas_init(
         page_size=page_size,
         max_seq_len=max_seq_len,
         token_budget=token_budget,
@@ -93,7 +93,7 @@ def benchmark_hsa():
     #         inputs_embeds=hidden_states,
     #     )
     
-    # model.hsa_clear()
+    # model.Adamas_clear()
 
     prefill_latency = []
     decode_latency = []
@@ -125,7 +125,7 @@ def benchmark_hsa():
                     decode_latency.append(te - ts)
                     prof.step()
         prof.export_chrome_trace(f"../test_results/profile_{token_budget}-{context_len}.json")
-        model.hsa_clear()
+        model.Adamas_clear()
     
     avg_prefill_latency = np.mean(prefill_latency)
     avg_decode_latency = np.mean(decode_latency)
@@ -136,6 +136,6 @@ def benchmark_hsa():
     # print(prof.key_averages().table(sort_by="cuda_time_total"))
 
 if __name__ == "__main__":
-    benchmark_hsa()
+    benchmark_Adamas()
 
 # nsys profile --delay 20 --duration 1 --output "$(env TZ='US/Pacific' date +%Y%m%d-%H%M%S).nsys-rep" python text_gen.py

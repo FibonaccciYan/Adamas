@@ -3,7 +3,7 @@ from itertools import product
 import torch
 import torch.nn as nn
 
-import HSA.utils
+import Adamas.utils
 
 def assert_close(a, b):
     rtol, atol = {
@@ -41,6 +41,6 @@ def test_pack_2bit(dtype_str, past_kv_len, seq_len):
     h = torch.bucketize(torch.randn(seq_len, 2 * num_heads, head_dim, dtype=dtype, device=device), threshlods).to(dtype)
 
     h_ref = _ref_pack_2bit(h, dtype)
-    h_gpu = HSA.utils.pack_2bit(h, past_kv_len, dtype)
+    h_gpu = Adamas.utils.pack_2bit(h, past_kv_len, dtype)
 
     assert_close(h_gpu, h_ref)

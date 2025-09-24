@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import math
 
-import HSA.utils
+import Adamas.utils
 
 from fast_hadamard_transform import hadamard_transform
 
@@ -92,7 +92,7 @@ def test_estimate_correctness(dtype_str, kv_len):
     k_prefill = torch.randn(kv_len-1, num_heads, head_dim, dtype=dtype, device=device)
     v_prefill = torch.randn(kv_len-1, num_heads, head_dim, dtype=dtype, device=device)
 
-    testController = HSA.utils.InferenceController(
+    testController = Adamas.utils.InferenceController(
         num_layers,
         num_heads,
         head_dim,
@@ -109,7 +109,7 @@ def test_estimate_correctness(dtype_str, kv_len):
     testController.prepare_hadamard(kv_len-1)
     testController.begin_forward(kv_len-1)
     # Construct KV
-    HSA.utils.append_kvh(k_prefill, v_prefill, h_prefill, testController, 0)
+    Adamas.utils.append_kvh(k_prefill, v_prefill, h_prefill, testController, 0)
     testController.end_forward()
 
     k_decode = torch.randn(1, num_heads, head_dim, dtype=dtype, device=device)
@@ -120,7 +120,7 @@ def test_estimate_correctness(dtype_str, kv_len):
     # CUDA Evaluation
     testController.prepare_hadamard(qo_len)
     testController.begin_forward(qo_len)
-    q_code_2bit = HSA.utils.append_kvh(k_decode, v_decode, h_decode, testController, 0)
+    q_code_2bit = Adamas.utils.append_kvh(k_decode, v_decode, h_decode, testController, 0)
 
     thresholds = torch.tensor([-10, 0, 10], device=device)
     q_code_2bit_ref = pack_2bit(
@@ -134,7 +134,7 @@ def test_estimate_correctness(dtype_str, kv_len):
 
     assert_close(q_code_2bit, q_code_2bit_ref)
 
-    cuda_estimated_value = HSA.utils.decode_estimate(
+    cuda_estimated_value = Adamas.utils.decode_estimate(
         q_code_2bit,
         testController,
         0,

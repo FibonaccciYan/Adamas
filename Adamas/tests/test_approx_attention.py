@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import math
 
-import HSA.utils
+import Adamas.utils
 
 from fast_hadamard_transform import hadamard_transform
 
@@ -124,7 +124,7 @@ def test_approx_attention_correctness(dtype_str, qo_len, kv_len, token_budget):
     k_prefill = torch.randn(kv_len-1, num_heads, head_dim, dtype=dtype, device=device)
     v_prefill = torch.randn(kv_len-1, num_heads, head_dim, dtype=dtype, device=device)
 
-    testController = HSA.utils.InferenceController(
+    testController = Adamas.utils.InferenceController(
         num_layers,
         num_heads,
         head_dim,
@@ -142,7 +142,7 @@ def test_approx_attention_correctness(dtype_str, qo_len, kv_len, token_budget):
     testController.prepare_hadamard(kv_len-1)
     testController.begin_forward(kv_len-1)
     # Construct KV
-    HSA.utils.append_kvh(k_prefill, v_prefill, k_prefill_code_2bit, testController, 0)
+    Adamas.utils.append_kvh(k_prefill, v_prefill, k_prefill_code_2bit, testController, 0)
     testController.end_forward()
 
     k_decode = torch.randn(1, num_heads, head_dim, dtype=dtype, device=device)
@@ -159,10 +159,10 @@ def test_approx_attention_correctness(dtype_str, qo_len, kv_len, token_budget):
     # CUDA Evaluation
     testController.prepare_hadamard(qo_len)
     testController.begin_forward(qo_len)
-    HSA.utils.append_kvh(k_decode, v_decode, k_decode_code_2bit, testController, 0)
+    Adamas.utils.append_kvh(k_decode, v_decode, k_decode_code_2bit, testController, 0)
     
     if testController.need_estimate() == False:
-        o_device = HSA.utils.decode_sparse_attn(
+        o_device = Adamas.utils.decode_sparse_attn(
             q,
             testController,
             0,
@@ -173,16 +173,16 @@ def test_approx_attention_correctness(dtype_str, qo_len, kv_len, token_budget):
         # Here we control the same top-k indices for correctness test.
         # Estimate and top-k kernel are tested separately 
 
-        # estimated_attn_score = HSA.utils.decode_estimate(
+        # estimated_attn_score = Adamas.utils.decode_estimate(
         #     q,
         #     testController,
         #     0,
         # )
-        # HSA.utils.decode_topk(
+        # Adamas.utils.decode_topk(
         #     estimated_attn_score,
         #     testController,
         # )
-        o_device = HSA.utils.decode_sparse_attn(
+        o_device = Adamas.utils.decode_sparse_attn(
             q,
             testController,
             0,

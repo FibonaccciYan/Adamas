@@ -1,3 +1,3 @@
-# HSA
+# Adamas
 
-HSA(Hadamard Sparse Attention)
+Adamas: Hadamard Sparse Attention for Efficient Long-context Inference

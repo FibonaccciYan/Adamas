@@ -2,11 +2,11 @@ import torch
 import math
 from typing import Optional
 
-import HSA._kernels as _kernels
-from HSA.utils.utils import TensorLayout
-from HSA.utils.kv_cache import KvCache
-from HSA.utils.controller import InferenceController
-from HSA.utils.decode_wrapper import BatchDecodeWithPagedKVCacheWrapper
+import Adamas._kernels as _kernels
+from Adamas.utils.utils import TensorLayout
+from Adamas.utils.kv_cache import KvCache
+from Adamas.utils.controller import InferenceController
+from Adamas.utils.decode_wrapper import BatchDecodeWithPagedKVCacheWrapper
 
 __all__ = [
     'TensorLayout',

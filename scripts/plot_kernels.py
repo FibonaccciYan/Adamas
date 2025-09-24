@@ -4,7 +4,7 @@ import numpy as np
 
 plt.rcParams.update({
     "font.size": 18,
-    "font.family": "serif",   # 论文常用字体
+    "font.family": "serif",
     "figure.dpi": 300
 })
 
@@ -26,33 +26,33 @@ data = {
 df = pd.DataFrame(data)
 
 colors = {
-    "Estimation": "#56B1E4",
-    "Top-K Selection": "#1379DF",      
-    "Approximate Attention": "#2049BE"
+    "Similarity estimation": "#56B1E4",
+    "Top-$k$ selection": "#1379DF",      
+    "Approximate attention": "#2049BE"
 }
 
-# 显示顺序的 y 轴刻度
 y_ticks = [256, 512, 1024, 2048, 4096, 102400]
-y_labels = ["256", "512", "1024", "2048", "4096", "Full Attn"]
+y_labels = ["256", "512", "1024", "2048", "4096", "Full"]
+ratio_pad = [20, 40, 80]
 
 context_lens = sorted(df["context_len"].unique())
 
 fig, axes = plt.subplots(1, 3, figsize=(15, 6))
 
 for i, (ax, cl) in enumerate(zip(axes, context_lens)):
-    subdf = df[df["context_len"] == cl].sort_values("token_budget")
+    subdf = df[df["context_len"] == cl].sort_values("token_budget").reset_index(drop=True) 
     
     y_pos = np.arange(len(subdf))
     est = subdf["estimate"].values
     topk = subdf["topk"].values
     attn = subdf["approx_attn"].values
+
+    total = est + topk + attn
     
-    # 堆叠柱状图
-    ax.barh(y_pos, est, color=colors["Estimation"], label="Estimation" if i==0 else "")
-    ax.barh(y_pos, topk, left=est, color=colors["Top-K Selection"], label="Top-K Selection" if i==0 else "")
-    ax.barh(y_pos, attn, left=est+topk, color=colors["Approximate Attention"], label="Approximate Attention" if i==0 else "")
+    ax.barh(y_pos, est, color=colors["Similarity estimation"], label="Similarity estimation" if i==0 else "")
+    ax.barh(y_pos, topk, left=est, color=colors["Top-$k$ selection"], label="Top-$k$ selection" if i==0 else "")
+    ax.barh(y_pos, attn, left=est+topk, color=colors["Approximate attention"], label="Approximate attention" if i==0 else "")
     
-    # y 轴顺序：从上往下递增
     ax.set_ylim(-0.5, len(y_pos)-0.5)
     ax.invert_yaxis()
     
@@ -61,18 +61,45 @@ for i, (ax, cl) in enumerate(zip(axes, context_lens)):
         ax.set_yticklabels(y_labels)
     else:
         ax.set_yticks(y_pos)
-        ax.set_yticklabels([])  # 去掉中间和右侧的 y 轴刻度
+        ax.set_yticklabels([]) 
     
-    # context_len 和 latency 放在 x 轴下面
-    ax.set_xlabel(f"Latency (us)\n\nSequence Length: {cl}")
+    ax.set_xlabel(f"Latency (us)\n\nSequence length: {cl}")
 
-    # 在 x 轴刻度处画竖线
     ax.xaxis.grid(True, which="major", linestyle="-", color="gray", alpha=0.6)
-    ax.set_axisbelow(True)  # 让网格线在柱子下方
+    ax.set_axisbelow(True) 
 
-# 图例放上面
-fig.legend(["Estimation", "Top-K Selection", "Approximate Attention"], loc="upper center", ncol=3, frameon=False)
+    row_256 = subdf[subdf["token_budget"] == 256].index[0]   # 第一行
+    row_full = subdf[subdf["token_budget"] == 102400].index[0]  # Full 行
+    
+    latency_256 = total[row_256]
+    latency_full = total[row_full]
+    ratio = latency_full / latency_256 if latency_256 > 0 else np.nan
 
-plt.tight_layout(rect=[0, 0, 1, 0.95])
-plt.savefig("/data0/ysy/HSA/results/kernels.png")
-plt.savefig("/data0/ysy/HSA/results/kernels.pdf")
+    y_256 = y_pos[row_256]
+    
+    # 中间数字位置（偏离上下约 0.25 保证不被柱子遮挡）
+    mid_x = (latency_full + latency_256) / 2
+    ax.text(mid_x, y_256, f"×{ratio:.1f}",
+            ha="center", va="center", fontsize=18, fontweight="bold")
+
+    # 左侧箭头（从256柱子末端 -> 中间数字）
+    ax.annotate(
+        "", 
+        xy=(latency_256, y_256), xycoords="data",     # -5 是为了让箭头不要顶到文字
+        xytext=(mid_x - ratio_pad[i], y_256), textcoords="data",
+        arrowprops=dict(arrowstyle="->", color="black", lw=1.2)
+    )
+    
+    # 右侧箭头（从Full柱子末端 -> 中间数字）
+    ax.annotate(
+        "", 
+        xy=(latency_full, y_256), xycoords="data",     # +5 同理
+        xytext=(mid_x + ratio_pad[i], y_256), textcoords="data",
+        arrowprops=dict(arrowstyle="->", color="black", lw=1.2)
+    )
+
+fig.legend(["Similarity estimation", "Top-$k$ selection", "Approximate attention"], loc="upper center", ncol=3, frameon=False)
+
+plt.tight_layout(rect=[0, 0, 1, 0.93])
+plt.savefig("/data0/ysy/Adamas/results/kernels.png", bbox_inches="tight", pad_inches=0.02)
+plt.savefig("/data0/ysy/Adamas/results/kernels.pdf", bbox_inches="tight", pad_inches=0.02)

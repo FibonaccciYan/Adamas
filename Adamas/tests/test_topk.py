@@ -5,11 +5,11 @@ import torch
 import torch.nn as nn
 import math
 
-import HSA.utils
+import Adamas.utils
 
 # This file is used for testing topk kernel from libRAFT
 # We do not seriously compare the topk indices since the random value leads to similar tensor.
-# Detailed evaluation is in HSA/tests/topk/*
+# Detailed evaluation is in Adamas/tests/topk/*
 # Therefore instead, we pay attention to the qk result (collected attention scores).
 
 def assert_close(a, b):
@@ -50,7 +50,7 @@ def test_topk_correctness(dtype_str, kv_len, k_budget):
     cuda_output_indices = torch.arange(0, k_budget, dtype=torch.int32, device=device).repeat(num_heads, 1)
     topk_buf = torch.zeros((num_heads, 8192 * 2 * (2+4) // 2 // 48), dtype=dtype, device=device)
 
-    HSA.utils._kernels.topk_filtering(
+    Adamas.utils._kernels.topk_filtering(
         cuda_input_data,
         cuda_input_indices,
         cuda_output_data,

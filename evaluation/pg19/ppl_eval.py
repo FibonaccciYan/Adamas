@@ -22,7 +22,7 @@ parser.add_argument("--output_dir", type=str)
 
 parser.add_argument("--num_eval_tokens", type=int, default=None)
 
-parser.add_argument("--HSA", action="store_true", help="Enable HSA attention")
+parser.add_argument("--Adamas", action="store_true", help="Enable Adamas attention")
 parser.add_argument("--token_budget", type=int, default=1024)
 parser.add_argument("--chunk_size", type=int, default=16)
 
@@ -61,8 +61,8 @@ nlls = []
 loss_fn = CrossEntropyLoss(reduction="none")
 past_key_values = None
 
-if args.HSA:
-    print("Enable HSA attention")
+if args.Adamas:
+    print("Enable Adamas attention")
     from evaluation.hadamard_attention import (
         enable_hadamard_attention_eval,
     )
@@ -70,7 +70,7 @@ if args.HSA:
     enable_hadamard_attention_eval(model, args)
 
 os.makedirs(args.output_dir, exist_ok=True)
-f = open(f"{args.output_dir}/log_HSA_{args.token_budget}.txt", "w")
+f = open(f"{args.output_dir}/log_Adamas_{args.token_budget}.txt", "w")
 
 num_eval_tokens = 0
 for text in data["text"][:1]:
@@ -110,5 +110,5 @@ f.close()
 
 ppl = torch.exp(torch.stack(nlls).mean())
 print(ppl.item())
-with open(f"{args.output_dir}/ppl_HSA_{args.token_budget}.txt", "w") as f:
+with open(f"{args.output_dir}/ppl_Adamas_{args.token_budget}.txt", "w") as f:
     f.write(f"{ppl.item()}\n")

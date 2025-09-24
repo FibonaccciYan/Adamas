@@ -10,21 +10,21 @@ torch.set_default_dtype(DTYPE)
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 
 RUNTIME_CFGS = [
-    "HSA",
+    "Adamas",
     "hg",
     ]
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--method", choices=RUNTIME_CFGS, default="HSA")
+parser.add_argument("--method", choices=RUNTIME_CFGS, default="Adamas")
 parser.add_argument("--token_budget", type=int, default=1024)
 args = parser.parse_args()
 
-if args.method == "HSA":
-    from HSA import LlamaForCausalLM
+if args.method == "Adamas":
+    from Adamas import LlamaForCausalLM
     model = LlamaForCausalLM.from_pretrained(MODEL_PATH, device_map=DEVICE, torch_dtype=DTYPE)
 
-    # Init HSA Controller
-    model.hsa_init(page_size=1, max_seq_len=8192, token_budget=args.token_budget)
+    # Init Adamas Controller
+    model.Adamas_init(page_size=1, max_seq_len=8192, token_budget=args.token_budget)
 else:
     from transformers import LlamaForCausalLM
     model = LlamaForCausalLM.from_pretrained(MODEL_PATH, device_map=DEVICE, torch_dtype=DTYPE)

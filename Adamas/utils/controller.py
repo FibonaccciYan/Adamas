@@ -1,6 +1,6 @@
-from HSA.utils.decode_wrapper import BatchDecodeWithPagedKVCacheWrapper
-from HSA.utils.kv_cache import KvCache
-from HSA.utils.utils import TensorLayout
+from Adamas.utils.decode_wrapper import BatchDecodeWithPagedKVCacheWrapper
+from Adamas.utils.kv_cache import KvCache
+from Adamas.utils.utils import TensorLayout
 
 import torch
 

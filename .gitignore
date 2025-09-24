@@ -223,4 +223,5 @@ evaluation/pg19/results
 *.egg-info/
 
 test_results/*
-HSA_small.zip
+
+scripts/plot_*.py

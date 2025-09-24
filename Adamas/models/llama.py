@@ -17,9 +17,9 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import add_start_docstrings, add_start_docstrings_to_model_forward, logging, replace_return_docstrings
 from transformers.models.llama.configuration_llama import LlamaConfig
 
-from HSA.models.HadamardSparseAttention import HadamardSparseAttention
-from HSA.utils.controller import InferenceController
-from HSA.utils import rms_norm_forward
+from Adamas.models.Adamas import Adamas
+from Adamas.utils.controller import InferenceController
+from Adamas.utils import rms_norm_forward
 
 logger = logging.get_logger(__name__)
 
@@ -106,7 +106,7 @@ class LlamaDecoderLayer(nn.Module):
     def __init__(self, config: LlamaConfig, layer_idx:int):
         super().__init__()
         self.hidden_size = config.hidden_size
-        self.self_attn = HadamardSparseAttention(config=config, layer_idx=layer_idx)
+        self.self_attn = Adamas(config=config, layer_idx=layer_idx)
         self.mlp = LlamaMLP(config)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -309,7 +309,7 @@ class LlamaModel(LlamaPreTrainedModel):
 
         self.gradient_checkpointing = False
         
-        # Leave HSA controller as uninitialized
+        # Leave Adamas controller as uninitialized
         self.iController = None
         
         # Initialize weights and apply final processing
@@ -421,21 +421,21 @@ class LlamaModel(LlamaPreTrainedModel):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = () if use_cache else None
 
-        # Configure HSA Controller
+        # Configure Adamas Controller
         # Prepare indices/indptr for newly appended tokens
-        assert self.iController is not None, "Please init HSA Controller first."
+        assert self.iController is not None, "Please init Adamas Controller first."
         self.iController.prepare_hadamard(seq_length)
 
         # Skip layers by setting infinite budgets
-        if self._hsa_skip_layer > 0:
-            self.iController.set_page_budget(self._hsa_max_page_limit)
+        if self._Adamas_skip_layer > 0:
+            self.iController.set_page_budget(self._Adamas_max_page_limit)
             self.iController.begin_forward(seq_length)
 
         for idx, decoder_layer in enumerate(self.layers):
             # Configure regular skipping layers
-            if idx == self._hsa_skip_layer:
+            if idx == self._Adamas_skip_layer:
                 self.iController.end_forward()
-                self.iController.set_page_budget(self._hsa_page_budget)
+                self.iController.set_page_budget(self._Adamas_page_budget)
                 # Avoid the redundant init/copy of hadamard
                 # if previous skip layer does, then skip it again
                 self.iController.begin_forward(seq_length, updateTensor=(idx==0))
@@ -484,7 +484,7 @@ class LlamaModel(LlamaPreTrainedModel):
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
 
-        # Configure HSA Controller
+        # Configure Adamas Controller
         self.iController.end_forward()
 
         torch.cuda.nvtx.range_push("lastnorm")
@@ -515,11 +515,11 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self._config = config # saved for hsa init
+        self._config = config # saved for Adamas init
         # Initialize weights and apply final processing
         self.post_init()
     
-    def hsa_init(
+    def Adamas_init(
         self,
         page_size: int,
         max_seq_len: int,
@@ -528,32 +528,32 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         device = torch.device("cuda:0"),
     ):
         """
-        Init function for HSA. Must be called before forwarding.
+        Init function for Adamas. Must be called before forwarding.
         This function allocates all GPU memory for max_seq_len KV-Cache.
         """
-        assert self.model.iController is None, "Can't init HSA Controller twice."
+        assert self.model.iController is None, "Can't init Adamas Controller twice."
         
         config = self._config
-        self.model._hsa_page_size = page_size
-        self.model._hsa_page_budget = token_budget // page_size # default page budget
-        self.model._hsa_max_page_limit = 1024*1024 # arbitraty large size
-        self.model._hsa_skip_layer = 2
+        self.model._Adamas_page_size = page_size
+        self.model._Adamas_page_budget = token_budget // page_size # default page budget
+        self.model._Adamas_max_page_limit = 1024*1024 # arbitraty large size
+        self.model._Adamas_skip_layer = 2
         
         self.model.iController = InferenceController(
             num_layers=config.num_hidden_layers,
             num_heads=config.num_attention_heads,
             head_dim=config.hidden_size // config.num_attention_heads,
             page_size=page_size,
-            page_budget=self.model._hsa_page_budget,
+            page_budget=self.model._Adamas_page_budget,
             max_seq_len=max_seq_len, # Used for allocating KV Pools
             dtype=dtype,
             device=device
         )
         
-        print(f"HSA allocates KV-Cache of {max_seq_len} tokens")
+        print(f"Adamas allocates KV-Cache of {max_seq_len} tokens")
         print(f"Token budget is set to {token_budget}")
     
-    def hsa_clear(self):
+    def Adamas_clear(self):
         """
         Assistant function for cleaning states of KV-Cache,
         which prepares for a new conversation.

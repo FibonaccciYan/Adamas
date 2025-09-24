@@ -9,7 +9,7 @@ from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding, apply_rotary_pos_emb, repeat_kv, logger
 from transformers.cache_utils import Cache
 
-import HSA.utils
+import Adamas.utils
 
 # from fast_hadamard_transform import hadamard_transform
 import faster_hadamard_transform
@@ -17,7 +17,7 @@ import faster_hadamard_transform
 import pdb
 
 
-class HadamardSparseAttention(nn.Module):
+class Adamas(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(self, config: LlamaConfig, layer_idx: Optional[int] = None):
@@ -76,13 +76,13 @@ class HadamardSparseAttention(nn.Module):
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.46
-        iController: Optional[HSA.utils.InferenceController] = None,
+        iController: Optional[Adamas.utils.InferenceController] = None,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
-        assert bsz == 1, "HSA only supports batch size 1."
-        assert hasattr(self, 'layer_idx'), "HSA requires layer_idx to inference."
+        assert bsz == 1, "Adamas only supports batch size 1."
+        assert hasattr(self, 'layer_idx'), "Adamas requires layer_idx to inference."
 
         if self.config.pretraining_tp > 1:
             key_value_slicing = (self.num_key_value_heads * self.head_dim) // self.config.pretraining_tp
@@ -111,7 +111,7 @@ class HadamardSparseAttention(nn.Module):
         value_states = value_states.view(q_len, self.num_key_value_heads, self.head_dim)
 
         torch.cuda.nvtx.range_push("RoPE")
-        HSA.utils.apply_rope_in_place(query_states, key_states, iController.kv_cache.seqlen - q_len, rope_scale=self.rope_scale)
+        Adamas.utils.apply_rope_in_place(query_states, key_states, iController.kv_cache.seqlen - q_len, rope_scale=self.rope_scale)
         torch.cuda.nvtx.range_pop()
     
 
@@ -121,11 +121,11 @@ class HadamardSparseAttention(nn.Module):
             hadamard_states = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
             torch.cuda.nvtx.range_pop()
 
-            # HSA manages KV-Cache internal (with PageAttention)
+            # Adamas manages KV-Cache internal (with PageAttention)
             # Here we do not concat / stack
             # We concat after RoPE
             torch.cuda.nvtx.range_push("append_kvh")
-            HSA.utils.append_kvh(
+            Adamas.utils.append_kvh(
                 key_states,
                 value_states,
                 hadamard_states,
@@ -135,7 +135,7 @@ class HadamardSparseAttention(nn.Module):
             torch.cuda.nvtx.range_pop()
             
             torch.cuda.nvtx.range_push("prefill_attn")
-            attn_output = HSA.utils.prefill_forward(
+            attn_output = Adamas.utils.prefill_forward(
                 query_states,
                 iController,
                 self.layer_idx,
@@ -151,11 +151,9 @@ class HadamardSparseAttention(nn.Module):
             faster_hadamard_transform.hadamard_transform(hadamard_states, inplace=True)
             torch.cuda.nvtx.range_pop()
 
-            # HSA manages KV-Cache internal (with PageAttention)
-            # Here we do not concat / stack
             # We concat after RoPE
             torch.cuda.nvtx.range_push("append_kvh")
-            query_code_2bit = HSA.utils.append_kvh(
+            query_code_2bit = Adamas.utils.append_kvh(
                 key_states,
                 value_states,
                 hadamard_states,
@@ -167,16 +165,16 @@ class HadamardSparseAttention(nn.Module):
             # Skipping layers is controled by PAGE_BUDGET, which is set in LlamaModel.
             if iController.need_estimate() == False:
                 torch.cuda.nvtx.range_push("full_attn")
-                attn_output = HSA.utils.decode_sparse_attn(
+                attn_output = Adamas.utils.decode_sparse_attn(
                     query_states,
                     iController,
                     self.layer_idx,
-                    iController.kv_indices_without_last,  # TODO: why without_last?
+                    iController.kv_indices_without_last, 
                 )
                 torch.cuda.nvtx.range_pop()
             else:
                 torch.cuda.nvtx.range_push("estimate")
-                estimated_attn_score = HSA.utils.decode_estimate(
+                estimated_attn_score = Adamas.utils.decode_estimate(
                     query_code_2bit,
                     iController,
                     self.layer_idx,
@@ -185,7 +183,7 @@ class HadamardSparseAttention(nn.Module):
 
                 # select top-k smallest indices
                 torch.cuda.nvtx.range_push("topk")
-                HSA.utils.decode_topk(
+                Adamas.utils.decode_topk(
                     estimated_attn_score,
                     iController,
                 )
@@ -195,7 +193,7 @@ class HadamardSparseAttention(nn.Module):
                 #     print(f"topk: {iController.topk_dindices_buffer[0]}")
 
                 torch.cuda.nvtx.range_push("approx_attn")
-                attn_output = HSA.utils.decode_sparse_attn(
+                attn_output = Adamas.utils.decode_sparse_attn(
                     query_states,
                     iController,
                     self.layer_idx,

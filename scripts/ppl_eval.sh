@@ -13,7 +13,7 @@ device=0
 #         --model_name_or_path $MODELPATH \
 #         --output_dir $OUTPUT_DIR \
 #         --num_eval_tokens 32000 \
-#         --HSA --token_budget $budget --chunk_size 1 
+#         --Adamas --token_budget $budget --chunk_size 1 
 # done
 
 CUDA_VISIBLE_DEVICES=1 python -u ppl_eval.py \

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import math
 
-import HSA.utils
+import Adamas.utils
 
 from fast_hadamard_transform import hadamard_transform
 
@@ -85,7 +85,7 @@ def test_prefill_attention_correctness(dtype_str, qo_len, kv_len):
     k = torch.randn(kv_len, num_heads, head_dim, dtype=dtype, device=device)
     v = torch.randn(kv_len, num_heads, head_dim, dtype=dtype, device=device)
 
-    testController = HSA.utils.InferenceController(
+    testController = Adamas.utils.InferenceController(
         num_layers,
         num_heads,
         head_dim,
@@ -103,8 +103,8 @@ def test_prefill_attention_correctness(dtype_str, qo_len, kv_len):
     testController.prepare_hadamard(kv_len)
     testController.begin_forward(kv_len)
     # Construct KV with maintained hadamard data
-    HSA.utils.append_kvh(k, v, k_code_2bit, testController, 0)
-    o_device = HSA.utils.prefill_forward(q, testController, 0)
+    Adamas.utils.append_kvh(k, v, k_code_2bit, testController, 0)
+    o_device = Adamas.utils.prefill_forward(q, testController, 0)
     o_host = _ref_self_attention(q, k, v)
 
     assert_close(o_device, o_host)

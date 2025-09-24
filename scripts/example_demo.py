@@ -1,5 +1,5 @@
 '''
-    TUI for the speed demo between HSA and HuggingFace version.
+    TUI for the speed demo between Adamas and HuggingFace version.
     Adapted from: https://github.com/punica-ai/punica/blob/591b59899f0a20760821785d06b331c8a2e5cb86/examples/tui-multi-lora.py
 '''
 
@@ -68,12 +68,12 @@ class GenCtx():
         from transformers import AutoTokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.model = func_from_pretrained(model_path, device_map=self.device, torch_dtype=self.dtype)
-        if self.ctx_id == "HSA":
-            # Setup the HSA Controller
-            self.model.hsa_init(page_size=16, max_seq_len=32768, token_budget=2048, device=self.device)
+        if self.ctx_id == "Adamas":
+            # Setup the Adamas Controller
+            self.model.Adamas_init(page_size=16, max_seq_len=32768, token_budget=2048, device=self.device)
         elif self.ctx_id == "FlashInfer":
-            # Setup the HSA Controller
-            self.model.hsa_init(page_size=16, max_seq_len=32768, token_budget=32768, device=self.device)
+            # Setup the Adamas Controller
+            self.model.Adamas_init(page_size=16, max_seq_len=32768, token_budget=32768, device=self.device)
         
         self.output_ids = self.tokenizer.encode(prompt)
         self.prompt_len = len(self.output_ids)
@@ -206,7 +206,7 @@ class MultiLoraTui(App):
 }
 """
 
-    TITLE = "HSA Long-context Inference Demo"
+    TITLE = "Adamas Long-context Inference Demo"
 
     BINDINGS = [
         Binding(key="q", action="quit", description="Quit"),
@@ -247,19 +247,19 @@ class InferSpec:
     stop_token_id: int
     ctx_id: str
 
-import HSA
+import Adamas
 
-HSASpec = InferSpec(
+AdamasSpec = InferSpec(
     model_path="/mnt/storage/models/longchat-7b-v1.5-32k",
     device="cuda:0",
     temperature=1.0,
     repetition_penalty=1.1,
-    func_from_pretrained=HSA.LlamaForCausalLM.from_pretrained,
+    func_from_pretrained=Adamas.LlamaForCausalLM.from_pretrained,
     top_p=0.9,
     top_k=-1,
     maxlen=32768,
     stop_token_id=2,
-    ctx_id="HSA",
+    ctx_id="Adamas",
 )
 
 HgSpec = InferSpec(
@@ -280,7 +280,7 @@ FlashSpec = InferSpec(
     device="cuda:1",
     temperature=1.0,
     repetition_penalty=1.1,
-    func_from_pretrained=HSA.LlamaForCausalLM.from_pretrained,
+    func_from_pretrained=Adamas.LlamaForCausalLM.from_pretrained,
     top_p=0.9,
     top_k=-1,
     maxlen=32768,
@@ -289,7 +289,7 @@ FlashSpec = InferSpec(
 )
 
 DemoSpec = [
-    HSASpec,
+    AdamasSpec,
     # FlashSpec,
 ]
 

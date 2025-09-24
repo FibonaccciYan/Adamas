@@ -102,5 +102,5 @@ ax.set_ylabel("Latency (ms)")
 ax.legend()
 
 plt.tight_layout()
-plt.savefig("/data0/ysy/HSA/results/e2e.png")
-plt.savefig("/data0/ysy/HSA/results/e2e.pdf")
+plt.savefig("/data0/ysy/Adamas/results/e2e.png")
+plt.savefig("/data0/ysy/Adamas/results/e2e.pdf")
