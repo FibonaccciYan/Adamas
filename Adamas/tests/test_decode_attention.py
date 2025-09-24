@@ -7,7 +7,7 @@ import math
 
 import Adamas.utils
 
-from fast_hadamard_transform import hadamard_transform
+import faster_hadamard_transform
 
 def pack_2bit(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     """
@@ -100,7 +100,7 @@ def test_decode_attention_correctness(dtype_str, qo_len, kv_len):
         device,
     )
 
-    k_prefill_code = torch.bucketize(hadamard_transform(k_prefill), testController.thresholds, out_int32=True).to(device)
+    k_prefill_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k_prefill), testController.thresholds, out_int32=True).to(device)
     k_prefill_code_2bit = pack_2bit(k_prefill_code, k_prefill_code.dtype).to(device)
 
     # Begin: Fill in prefill kv-data
@@ -113,7 +113,7 @@ def test_decode_attention_correctness(dtype_str, qo_len, kv_len):
     k_decode = torch.randn(1, num_heads, head_dim, dtype=dtype, device=device)
     v_decode = torch.randn(1, num_heads, head_dim, dtype=dtype, device=device)
 
-    k_decode_code = torch.bucketize(hadamard_transform(k_decode),   testController.thresholds, out_int32=True).to(device)
+    k_decode_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k_decode),   testController.thresholds, out_int32=True).to(device)
     k_decode_code_2bit = pack_2bit(k_decode_code, k_decode_code.dtype).to(device)
     # Real decoding starts
     testController.prepare_hadamard(1)

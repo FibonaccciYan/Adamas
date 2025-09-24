@@ -7,7 +7,7 @@ import math
 
 import Adamas.utils
 
-from fast_hadamard_transform import hadamard_transform
+import faster_hadamard_transform
 
 def pack_2bit(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     *dims, hd = x.shape
@@ -51,8 +51,8 @@ def _ref_cpu_estimate(
     v = v.transpose(0, 1)
 
     thresholds = torch.tensor([-10, 0, 10]).to(q.device)
-    q_code = torch.bucketize(hadamard_transform(q), thresholds, out_int32=True)
-    k_code = torch.bucketize(hadamard_transform(k), thresholds, out_int32=True)
+    q_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(q), thresholds, out_int32=True)
+    k_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(k), thresholds, out_int32=True)
 
     approx_attn = nn.functional.pairwise_distance(
         q_code,
@@ -103,7 +103,7 @@ def test_estimate_correctness(dtype_str, kv_len):
         device,
     )
 
-    h_prefill = hadamard_transform(k_prefill)
+    h_prefill = faster_hadamard_transform.hadamard_transform(k_prefill)
 
     # Begin: Fill in prefill kv-data
     testController.prepare_hadamard(kv_len-1)
@@ -116,7 +116,7 @@ def test_estimate_correctness(dtype_str, kv_len):
     v_decode = torch.randn(1, num_heads, head_dim, dtype=dtype, device=device)
 
     h_decode = torch.cat((q, k_decode), dim=0)
-    h_decode = hadamard_transform(h_decode)
+    h_decode = faster_hadamard_transform.hadamard_transform(h_decode)
     # CUDA Evaluation
     testController.prepare_hadamard(qo_len)
     testController.begin_forward(qo_len)
@@ -125,7 +125,7 @@ def test_estimate_correctness(dtype_str, kv_len):
     thresholds = torch.tensor([-10, 0, 10], device=device)
     q_code_2bit_ref = pack_2bit(
         torch.bucketize(
-            hadamard_transform(q), 
+            faster_hadamard_transform.hadamard_transform(q), 
             thresholds, 
             out_int32=True
         ), 
