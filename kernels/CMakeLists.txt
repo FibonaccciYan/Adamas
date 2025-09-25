@@ -9,11 +9,10 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES native)
 endif()
 
-# 读取环境变量 BENCH_ENABLE（值为 1 / ON 则编译，其他跳过）
 if(DEFINED ENV{BENCH_ENABLE})
   set(BUILD_BENCH "$ENV{BENCH_ENABLE}")
 else()
-  set(BUILD_BENCH ON)          # 默认打开，或者改成 OFF
+  set(BUILD_BENCH ON)
 endif()
 
 # ------------- configure rapids-cmake --------------#
