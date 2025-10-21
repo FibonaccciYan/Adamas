@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import math
 
-import Adamas.utils
+import adamas.utils
 
 import faster_hadamard_transform
 
@@ -89,7 +89,7 @@ def test_decode_attention_correctness(dtype_str, qo_len, kv_len):
     k_prefill = torch.randn(kv_len-1, num_heads, head_dim, dtype=dtype, device=device)
     v_prefill = torch.randn(kv_len-1, num_heads, head_dim, dtype=dtype, device=device)
 
-    testController = Adamas.utils.InferenceController(
+    testController = adamas.utils.InferenceController(
         num_layers,
         num_heads,
         head_dim,
@@ -107,7 +107,7 @@ def test_decode_attention_correctness(dtype_str, qo_len, kv_len):
     testController.prepare_hadamard(kv_len-1)
     testController.begin_forward(kv_len-1)
     # Construct KV
-    Adamas.utils.append_kvh(k_prefill, v_prefill, k_prefill_code_2bit, testController, 0)
+    adamas.utils.append_kvh(k_prefill, v_prefill, k_prefill_code_2bit, testController, 0)
     testController.end_forward()
 
     k_decode = torch.randn(1, num_heads, head_dim, dtype=dtype, device=device)
@@ -118,10 +118,10 @@ def test_decode_attention_correctness(dtype_str, qo_len, kv_len):
     # Real decoding starts
     testController.prepare_hadamard(1)
     testController.begin_forward(1)
-    Adamas.utils.append_kvh(k_decode, v_decode, k_decode_code_2bit, testController, 0)
+    adamas.utils.append_kvh(k_decode, v_decode, k_decode_code_2bit, testController, 0)
     # No CPU test cases
     assert testController.need_estimate() == False
-    o_device = Adamas.utils.decode_sparse_attn(
+    o_device = adamas.utils.decode_sparse_attn(
         q,
         testController,
         0,

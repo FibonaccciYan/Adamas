@@ -1,7 +1,7 @@
 # This file is modified from Punica Project
 # Check ref: https://github.com/punica-ai/punica
 
-from Adamas.utils.utils import TensorLayout
+from adamas.utils.utils import TensorLayout
 import torch
 
 class KvPool:

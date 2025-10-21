@@ -1,8 +1,8 @@
 import torch
 from typing import Optional
 
-import Adamas._kernels as _kernels
-from Adamas.utils.utils import TensorLayout
+import adamas._kernels as _kernels
+from adamas.utils.utils import TensorLayout
 
 def _check_kv_layout(kv_layout: str):
     if not hasattr(TensorLayout, kv_layout):

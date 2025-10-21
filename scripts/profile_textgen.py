@@ -9,7 +9,7 @@ import torch
 from torch.profiler import profile, record_function, ProfilerActivity
 from tqdm.auto import tqdm
 
-from Adamas import LlamaForCausalLM
+from adamas import LlamaForCausalLM
 
 schedule = torch.profiler.schedule(
     wait=128,

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding, apply_rotary_pos_emb
 
-import Adamas.utils
+import adamas.utils
 
 def assert_close(a, b):
     rtol, atol = {
@@ -44,7 +44,7 @@ def test_apply_qk_rope(dtype_str, past_kv_len, seq_len):
     k = torch.randn(seq_len, num_heads, head_dim, dtype=dtype, device=device)
 
     q_ref, k_ref = _ref_apply_qk_rope(q, k, past_kv_len)
-    Adamas.utils.apply_rope_in_place(q, k, past_kv_len)
+    adamas.utils.apply_rope_in_place(q, k, past_kv_len)
 
     assert_close(q, q_ref)
     assert_close(k, k_ref)

@@ -1,4 +1,4 @@
-from Adamas.models import LlamaForCausalLM
+from adamas.models import LlamaForCausalLM
 
 __version__ = "0.0.1"
 

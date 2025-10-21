@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from Adamas import LlamaForCausalLM
+from adamas import LlamaForCausalLM
 
 @dataclasses.dataclass
 class ModelConfig:

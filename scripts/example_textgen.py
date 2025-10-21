@@ -19,7 +19,7 @@ parser.add_argument("--token_budget", type=int, default=1024)
 args = parser.parse_args()
 
 if args.method == "Adamas":
-    from Adamas import LlamaForCausalLM
+    from adamas import LlamaForCausalLM
     model = LlamaForCausalLM.from_pretrained(MODEL_PATH, device_map=DEVICE, torch_dtype=DTYPE)
 
     # Init Adamas Controller
