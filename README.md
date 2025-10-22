@@ -131,7 +131,15 @@ python3 scripts/example_textgen.py
 
 ## Reference
 
-If you find this project useful for your research, please consider citing our paper.
+If you find this project useful for your research, please consider citing our paper：
+```
+@misc{yan2025adamas,
+    title = {Adamas: Hadamard Sparse Attention for Efficient Long-Context Inference},
+    author = {Siyuan Yan and Guo-Qing Jiang and Yuchen Zhang and Xiaoxing Ma and Ran Zhu and Chun Cao and Jingwei Xu},
+    year = {2025},
+    eprint = {arXiv:2510.18413},
+}
+```
 
 ## Credits
 
