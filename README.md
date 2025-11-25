@@ -41,7 +41,7 @@ cd kernels/3rdparty/raft
 
 # build faster_hadamard_transform
 cd kernels/3rdparty/applied-ai/kernels/cuda/inference/hadamard_transform
-pip install -e .
+pip install -e . --no-build-isolation
 ```
 
 3. Compile kernel benchmarks (Optional).
