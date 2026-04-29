@@ -4,18 +4,14 @@ import torch
 import json
 from transformers import (
     AutoTokenizer,
-    AutoConfig,
-    LlamaTokenizer,
-    LlamaForCausalLM,
     AutoModelForCausalLM,
 )
 from tqdm import tqdm
 import numpy as np
 import random
 import argparse
-from evaluation.adamas_attention import enable_adamas_attention_eval
-from evaluation.llama import enable_tuple_kv_cache_for_llama 
-# from evaluation.mistral import enable_tuple_kv_cache_for_mistral
+from evaluation.adamas_attention import enable_adamas_attention_eval 
+from evaluation.adamas_cache import AdamasDynamicCache
 
 
 def parse_args(args=None):
@@ -25,16 +21,8 @@ def parse_args(args=None):
         type=str,
         default=None,
         choices=[
-            "llama2-7b-chat-4k",
-            "longchat-v1.5-7b-32k",
-            "xgen-7b-8k",
-            "internlm-7b-8k",
-            "chatglm2-6b",
-            "chatglm2-6b-32k",
-            "chatglm3-6b-32k",
-            "vicuna-v1.5-7b-16k",
-            "Mistral-7B-Instruct-v0.3",
             "Meta-Llama-3.1-8B-Instruct",
+            "Qwen3-8b",
         ],
     )
     parser.add_argument("--e", action="store_true", help="Evaluate on LongBench-E")
@@ -44,42 +32,27 @@ def parse_args(args=None):
     parser.add_argument("--token_budget", type=int, default=None)
     parser.add_argument("--chunk_size", type=int, default=None)
     parser.add_argument("--Adamas", action="store_true", help="Enable Adamas Attention")
+    parser.add_argument("--thinking", action="store_true", help="Enable Qwen3 thinking mode (only valid when --model is set to Qwen3)")
 
     return parser.parse_args(args)
 
 
 # This is the customized building prompt for chat models
-def build_chat(tokenizer, prompt, model_name):
-    if "chatglm3" in model_name:
-        prompt = tokenizer.build_chat_input(prompt)
-    elif "chatglm" in model_name:
-        prompt = tokenizer.build_prompt(prompt)
-    elif "longchat" in model_name or "vicuna" in model_name:
-        from fastchat.model import get_conversation_template
-
-        conv = get_conversation_template("vicuna")
-        conv.append_message(conv.roles[0], prompt)
-        conv.append_message(conv.roles[1], None)
-        prompt = conv.get_prompt()
-    elif "llama2" in model_name:
-        prompt = f"[INST]{prompt}[/INST]"
-    elif "xgen" in model_name:
-        header = (
-            "A chat between a curious human and an artificial intelligence assistant. "
-            "The assistant gives helpful, detailed, and polite answers to the human's questions.\n\n"
+def build_chat(tokenizer, prompt, model_name, enable_thinking=False):
+    if "llama-3.1" in model_name.lower() or "meta-llama-3.1" in model_name.lower():
+        prompt = tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt}],
+            tokenize=False,
+            add_generation_prompt=True,
         )
-        prompt = header + f" ### Human: {prompt}\n###"
-    elif "internlm" in model_name:
-        prompt = f"<|User|>:{prompt}<eoh>\n<|Bot|>:"
+    elif "qwen3" in model_name.lower():
+        prompt = tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt}],
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=enable_thinking
+        )
     return prompt
-
-
-def post_process(response, model_name):
-    if "xgen" in model_name:
-        response = response.strip().replace("Assistant:", "")
-    elif "internlm" in model_name:
-        response = response.split("<eoa>")[0]
-    return response
 
 
 def get_pred(
@@ -92,6 +65,7 @@ def get_pred(
     dataset,
     device,
     model_name,
+    args,
 ):
     preds = []
     for json_obj in tqdm(data):
@@ -100,24 +74,24 @@ def get_pred(
         tokenized_prompt = tokenizer(
             prompt, truncation=False, return_tensors="pt"
         ).input_ids[0]
-        if "chatglm3" in model_name:
-            tokenized_prompt = tokenizer(
-                prompt, truncation=False, return_tensors="pt", add_special_tokens=False
-            ).input_ids[0]
         if len(tokenized_prompt) > max_length:
             half = int(max_length / 2)
             prompt = tokenizer.decode(
                 tokenized_prompt[:half], skip_special_tokens=True
             ) + tokenizer.decode(tokenized_prompt[-half:], skip_special_tokens=True)
-        if dataset not in [
-            "trec",
-            "triviaqa",
-            "samsum",
-            "lsht",
-            "lcc",
-            "repobench-p",
-        ]:  # chat models are better off without build prompts on these tasks
-            prompt = build_chat(tokenizer, prompt, model_name)
+
+        if "qwen3" in model_name.lower():
+            prompt = build_chat(tokenizer, prompt, model_name, enable_thinking=args.thinking)
+        else:
+            if dataset not in [
+                "trec",
+                "triviaqa",
+                "samsum",
+                "lsht",
+                "lcc",
+                "repobench-p",
+            ]:  # chat models are better off without build prompts on these tasks
+                prompt = build_chat(tokenizer, prompt, model_name)
 
         # split the prompt and question (simulate decoding in the question stage)
         if dataset in ["qasper", "hotpotqa"]:
@@ -138,16 +112,12 @@ def get_pred(
             question = prompt[q_pos:]
             prompt = prompt[:q_pos]
 
-        if "chatglm3" in model_name:
-            # input = prompt.to(device)
-            input = prompt.to("cuda")
-        else:
-            # input = tokenizer(prompt, truncation=False, return_tensors="pt").to(device)
-            input = tokenizer(prompt, truncation=False, return_tensors="pt").to("cuda")
-            q_input = tokenizer(question, truncation=False, return_tensors="pt").to(
-                "cuda"
-            )
-            q_input.input_ids = q_input.input_ids[:, 1:]
+        # input = tokenizer(prompt, truncation=False, return_tensors="pt").to(device)
+        input = tokenizer(prompt, truncation=False, return_tensors="pt").to("cuda")
+        q_input = tokenizer(question, truncation=False, return_tensors="pt").to(
+            "cuda"
+        )
+        q_input.input_ids = q_input.input_ids[:, 1:]
 
         context_length = input.input_ids.shape[-1] + q_input.input_ids.shape[-1]
 
@@ -168,10 +138,15 @@ def get_pred(
                 ],
             )[0]
         else:
+            if args.Adamas and "qwen3" in model_name.lower():
+                past_key_values = AdamasDynamicCache()
+            else:
+                past_key_values = None
+
             with torch.no_grad():
                 output = model(
                     input_ids=input.input_ids,
-                    past_key_values=None,
+                    past_key_values=past_key_values,
                     use_cache=True,
                 )
                 past_key_values = output.past_key_values
@@ -208,9 +183,16 @@ def get_pred(
             #     temperature=1.0,
             # )[0]
 
+        if "qwen3" in model_name.lower() and args.thinking:
+            # parsing thinking content
+            try:
+                # rindex finding 151668 (</think>)
+                index = len(generated_content) - generated_content[::-1].index(151668)
+            except ValueError:
+                index = 0
+            generated_content = generated_content[index:]
         pred = tokenizer.decode(generated_content, skip_special_tokens=True)
         # pred = tokenizer.decode(output[context_length:], skip_special_tokens=True)
-        pred = post_process(pred, model_name)
         preds.append(
             {
                 "pred": pred,
@@ -232,15 +214,14 @@ def seed_everything(seed):
     torch.cuda.manual_seed_all(seed)
 
 
-def load_model_and_tokenizer(path, model_name, device):
+def load_model_and_tokenizer(path, model_name, args):
     if 'llama' in model_name.lower() or 'longchat' in model_name.lower():
+        from evaluation.llama import enable_tuple_kv_cache_for_llama
         enable_tuple_kv_cache_for_llama()
-    # if 'mistral' in model_name.lower():
-    #     enable_tuple_kv_cache_for_mistral()
         
     tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
-        path, trust_remote_code=True, torch_dtype=torch.bfloat16, device_map="auto"
+        path, trust_remote_code=True, torch_dtype=torch.bfloat16, device_map="auto", attn_implementation="flash_attention_2"
     )
     model = model.eval()
 
@@ -259,7 +240,7 @@ if __name__ == "__main__":
     model_name = args.model
     # define your model
     model, tokenizer = load_model_and_tokenizer(
-        model2path[model_name], model_name, device
+        model2path[model_name], model_name, args
     )
     max_length = model2maxlen[model_name]
     if args.e:
@@ -308,6 +289,18 @@ if __name__ == "__main__":
                 out_path = f"pred/{model_name}/{dataset}-full.jsonl"
         prompt_format = dataset2prompt[dataset]
         max_gen = dataset2maxlen[dataset]
+
+        if "qwen3" in model_name.lower() and args.thinking:
+            reasoning_tasks = {
+                "gov_report", "multi_news", "qmsum",
+                "lcc", "repobench-p", "qasper"
+            }
+
+            if dataset in reasoning_tasks:
+                max_gen = max(max_gen * 4, 512)
+            else:
+                max_gen = max(max_gen * 4, 256)
+
         preds = get_pred(
             model,
             tokenizer,
@@ -318,6 +311,7 @@ if __name__ == "__main__":
             dataset,
             device,
             model_name,
+            args,
         )
         with open(out_path, "w", encoding="utf-8") as f:
             for pred in preds:

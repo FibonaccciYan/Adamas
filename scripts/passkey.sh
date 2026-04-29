@@ -1,9 +1,7 @@
 cd evaluation/passkey
 
-# MODEL=longchat-7b-v1.5-32k
-# MODELPATH=/path/to/lmsys/longchat-7b-v1.5-32k
-MODEL=Yarn-Llama-2-7b-128k
-MODELPATH=/path/to/NousResearch/Yarn-Llama-2-7b-128k
+MODEL=Qwen3-8b
+MODELPATH=/data1/model/qwen/Qwen/Qwen3-8B
 OUTPUT_DIR=results/$MODEL
 
 mkdir -p $OUTPUT_DIR
@@ -15,5 +13,6 @@ do
     python passkey.py -m $MODELPATH \
         --iterations 100 --fixed-length $length \
         --Adamas --token_budget $token_budget --chunk_size 1 \
-        --output-file $OUTPUT_DIR/$MODEL-Adamas-$token_budget.jsonl
+        --output-file $OUTPUT_DIR/$MODEL-Adamas-$token_budget.jsonl \
+        # --thinking
 done

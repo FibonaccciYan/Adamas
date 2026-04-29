@@ -15,7 +15,7 @@ class AdamasDynamicCache(Cache):
     def __init__(self) -> None:
         self.key_cache: List[torch.Tensor] = []
         self.value_cache: List[torch.Tensor] = []
-        self.hadamard_key_cache: List[torch.Tensor] = []
+        self.hadamard_cache: List[torch.Tensor] = []
         self._seen_tokens = 0  # Used in `generate` to keep tally of how many tokens the cache has seen
 
     def __getitem__(self, layer_idx: int) -> List[Tuple[torch.Tensor]]:
@@ -24,7 +24,7 @@ class AdamasDynamicCache(Cache):
         sequence length.
         """
         if layer_idx < len(self):
-            return (self.key_cache[layer_idx], self.value_cache[layer_idx], self.hadamard_key_cache[layer_idx])
+            return (self.key_cache[layer_idx], self.value_cache[layer_idx], self.hadamard_cache[layer_idx])
         else:
             raise KeyError(f"Cache only has {len(self)} layers, attempted to access layer with index {layer_idx}")
 
@@ -34,7 +34,7 @@ class AdamasDynamicCache(Cache):
         keys and values
         """
         for layer_idx in range(len(self)):
-            yield (self.key_cache[layer_idx], self.value_cache[layer_idx], self.hadamard_key_cache[layer_idx])
+            yield (self.key_cache[layer_idx], self.value_cache[layer_idx], self.hadamard_cache[layer_idx])
 
     def __len__(self):
         """
@@ -47,7 +47,7 @@ class AdamasDynamicCache(Cache):
         self,
         key_states: torch.Tensor,
         value_states: torch.Tensor,
-        hadamard_key_porj: torch.Tensor,
+        hadamard_states: torch.Tensor,
         layer_idx: int,
         cache_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -59,7 +59,7 @@ class AdamasDynamicCache(Cache):
                 The new key states to cache.
             value_states (`torch.Tensor`):
                 The new value states to cache.
-            hadamard_key_porj (`torch.Tensor`):
+            hadamard_states (`torch.Tensor`):
                 The Hadamard key projection to cache.
             layer_idx (`int`):
                 The index of the layer to cache the states for.
@@ -77,13 +77,13 @@ class AdamasDynamicCache(Cache):
         if len(self.key_cache) <= layer_idx:
             self.key_cache.append(key_states)
             self.value_cache.append(value_states)
-            self.hadamard_key_cache.append(hadamard_key_porj)
+            self.hadamard_cache.append(hadamard_states)
         else:
             self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], key_states], dim=-2)
             self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], value_states], dim=-2)
-            self.hadamard_key_cache[layer_idx] = torch.cat([self.hadamard_key_cache[layer_idx], hadamard_key_porj], dim=-2) if layer_idx > 1 else None
+            self.hadamard_cache[layer_idx] = torch.cat([self.hadamard_cache[layer_idx], hadamard_states], dim=-2)
 
-        return self.key_cache[layer_idx], self.value_cache[layer_idx], self.hadamard_key_cache[layer_idx]
+        return self.key_cache[layer_idx], self.value_cache[layer_idx], self.hadamard_cache[layer_idx] 
 
     def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
         """Returns the sequence length of the cached states. A layer index can be optionally passed."""
@@ -101,7 +101,7 @@ class AdamasDynamicCache(Cache):
         backward compatibility."""
         legacy_cache = ()
         for layer_idx in range(len(self)):
-            legacy_cache += ((self.key_cache[layer_idx], self.value_cache[layer_idx], self.hadamard_key_cache[layer_idx]),)
+            legacy_cache += ((self.key_cache[layer_idx], self.value_cache[layer_idx], self.hadamard_cache[layer_idx]),)
         return legacy_cache
 
     @classmethod
@@ -130,7 +130,7 @@ class AdamasDynamicCache(Cache):
         for idx in range(len(self.key_cache)):
             self.key_cache[idx] = self.key_cache[idx][..., :max_length, :]
             self.value_cache[idx] = self.value_cache[idx][..., :max_length, :]
-            self.hadamard_key_cache[idx] = self.hadamard_key_cache[idx][..., :max_length, :]
+            self.hadamard_cache[idx] = self.hadamard_cache[idx][..., :max_length, :]
 
     def batch_split(self, full_batch_size: int, split_size: int) -> List["AdamasDynamicCache"]:
         """Split the current instance into a list of `HadamardDynamicCache` by the batch size. This will be used by
@@ -141,7 +141,7 @@ class AdamasDynamicCache(Cache):
             current_split._seen_tokens = self._seen_tokens
             current_split.key_cache = [tensor[i : i + split_size] for tensor in self.key_cache]
             current_split.value_cache = [tensor[i : i + split_size] for tensor in self.value_cache]
-            current_split.hadamard_key_cache = [tensor[i : i + split_size] for tensor in self.hadamard_key_cache]
+            current_split.hadamard_cache = [tensor[i : i + split_size] for tensor in self.hadamard_cache]
             out.append(current_split)
         return out
 
@@ -153,7 +153,7 @@ class AdamasDynamicCache(Cache):
         for idx in range(len(splits[0])):
             layer_keys = torch.cat([current.key_cache[idx] for current in splits], dim=0)
             layer_values = torch.cat([current.value_cache[idx] for current in splits], dim=0)
-            layer_hadamard_keys = torch.cat([current.hadamard_key_cache[idx] for current in splits], dim=0)
+            layer_hadamard_keys = torch.cat([current.hadamard_cache[idx] for current in splits], dim=0)
             cache.update(layer_keys, layer_values, layer_hadamard_keys, idx)
         return cache
 
@@ -162,11 +162,11 @@ class AdamasDynamicCache(Cache):
         for layer_idx in range(len(self)):
             self.key_cache[layer_idx] = self.key_cache[layer_idx].repeat_interleave(repeats, dim=0)
             self.value_cache[layer_idx] = self.value_cache[layer_idx].repeat_interleave(repeats, dim=0)
-            self.hadamard_key_cache[layer_idx] = self.hadamard_key_cache[layer_idx].repeat_interleave(repeats, dim=0)
+            self.hadamard_cache[layer_idx] = self.hadamard_cache[layer_idx].repeat_interleave(repeats, dim=0)
 
     def batch_select_indices(self, indices: torch.Tensor):
         """Only keep the `indices` in the batch dimension of the cache. Used in contrastive search."""
         for layer_idx in range(len(self)):
             self.key_cache[layer_idx] = self.key_cache[layer_idx][indices, ...]
             self.value_cache[layer_idx] = self.value_cache[layer_idx][indices, ...]
-            self.hadamard_key_cache[layer_idx] = self.hadamard_key_cache[layer_idx][indices, ...]
+            self.hadamard_cache[layer_idx] = self.hadamard_cache[layer_idx][indices, ...]

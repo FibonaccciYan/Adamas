@@ -219,9 +219,12 @@ evaluation/LongBench/pred
 evaluation/LongBench/pred_e
 evaluation/passkey/results
 evaluation/pg19/results
+evaluation/RULER/scripts/benchmark_root_*
 
 *.egg-info/
 
 test_results/*
 
 scripts/plot_*.py
+
+.codex

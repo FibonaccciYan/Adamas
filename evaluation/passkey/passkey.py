@@ -6,14 +6,10 @@ import sys
 import os
 import torch
 import warnings
-from transformers import AutoTokenizer, pipeline, AutoModelForCausalLM
+from transformers import AutoTokenizer, pipeline, AutoModelForCausalLM, AutoConfig
 from tqdm import tqdm, trange
 from tqdm.contrib import tenumerate
 
-from evaluation.llama import enable_tuple_kv_cache_for_llama
-# from evaluation.mistral import enable_tuple_kv_cache_for_mistral
-
-from evaluation.adamas_attention import enable_adamas_dynamic_cache_for_llama
 from evaluation.adamas_cache import AdamasDynamicCache
 
 # from https://github.com/epfml/landmark-attention/blob/main/llama/run_test.py
@@ -56,9 +52,17 @@ def generate_prompt(n_garbage, depth_ratio):
     )
 
 
-def test_model(pipe, prompt_text, pass_key):
+def test_model(pipe, prompt_text, pass_key, model, args):
     # response = pipe(prompt_text, num_return_sequences=1, max_new_tokens=10)[
     #     0]["generated_text"][len(prompt_text):]
+
+    if "qwen3" in model.lower():
+        prompt_text = pipe.tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt_text}],
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=args.thinking
+        )
 
     length = len(prompt_text)
     q_length = 400
@@ -68,12 +72,15 @@ def test_model(pipe, prompt_text, pass_key):
     q_input = pipe.tokenizer(que, return_tensors="pt").to("cuda")
     q_input.input_ids = q_input.input_ids[:, 1:]
 
-    # past_key_values = HadamardDynamicCache()
+    if args.Adamas and "qwen3" in model.lower():
+        past_key_values = AdamasDynamicCache()
+    else:
+        past_key_values = None
 
     with torch.no_grad():
         output = pipe.model(
             input_ids=input.input_ids,
-            past_key_values=None,
+            past_key_values=past_key_values,
             use_cache=True,
         )
         past_key_values = output.past_key_values
@@ -99,6 +106,15 @@ def test_model(pipe, prompt_text, pass_key):
             generated_content += [pred_token_idx.item()]
             if pred_token_idx.item() == pipe.tokenizer.eos_token_id:
                 break
+
+    if "qwen3" in model.lower() and args.thinking:
+        # parsing thinking content
+        try:
+            # rindex finding 151668 (</think>)
+            index = len(generated_content) - generated_content[::-1].index(151668)
+        except ValueError:
+            index = 0
+        generated_content = generated_content[index:]
 
     response = pipe.tokenizer.decode(generated_content, skip_special_tokens=True)
 
@@ -171,10 +187,22 @@ def main(args):
         torch.cuda.empty_cache()
 
         if 'llama' in model.lower() or 'longchat' in model.lower():
+            from evaluation.llama import enable_tuple_kv_cache_for_llama
             enable_tuple_kv_cache_for_llama()
-            # enable_hadamard_dynamic_cache_for_llama()
-        # if 'mistral' in model.lower():
-        #     enable_tuple_kv_cache_for_mistral()
+
+        if 'qwen3' in model.lower() and args.fixed_length > 32768:
+
+            config = AutoConfig.from_pretrained(
+                model,
+                trust_remote_code=True,
+            )
+
+            config.rope_scaling = {
+                "rope_type": "yarn",
+                "factor": 4.0,
+                "original_max_position_embeddings": 32768,
+            }
+            config.max_position_embeddings = 32768 * 4
 
         loaded = AutoModelForCausalLM.from_pretrained(
             model,
@@ -182,10 +210,13 @@ def main(args):
             torch_dtype=torch.float16,
             trust_remote_code=True,
             low_cpu_mem_usage=True,
+            attn_implementation="flash_attention_2",
+            config=config # qwen3 yarn
         )
+        loaded = loaded.eval()
 
         if args.Adamas:
-            print("Enable hadamard attention")
+            print("Enable Adamas attention")
             from evaluation.adamas_attention import (
                 enable_adamas_attention_eval,
             )
@@ -209,7 +240,7 @@ def main(args):
                 )
 
                 num_tokens = len(pipe.tokenizer.encode(prompt_text))
-                answer = test_model(pipe, prompt_text, pass_key)
+                answer = test_model(pipe, prompt_text, pass_key, model, args)
                 if answer == pass_key:
                     result[i] += 1
 
@@ -269,4 +300,5 @@ if __name__ == "__main__":
     parser.add_argument("--Adamas", action="store_true", help="Enable hadamard attention")
     parser.add_argument("--token_budget", type=int, default=1024)
     parser.add_argument("--chunk_size", type=int, default=16)
+    parser.add_argument("--thinking", action="store_true", help="Enable Qwen3 thinking mode (only valid when --model is set to Qwen3)")
     main(add_args(parser).parse_args())
