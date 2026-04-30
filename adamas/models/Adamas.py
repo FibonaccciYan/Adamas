@@ -48,15 +48,19 @@ class Adamas(nn.Module):
 
 
     def _init_rope(self):
-        # rope_theta is default to 1e4, as set in RoPE kernel API.
         if self.config.rope_scaling is None:
             self.rotary_emb = LlamaRotaryEmbedding(self.head_dim, max_position_embeddings=self.max_position_embeddings)
             self.rope_scale = 1.0
         else:
-            scaling_type = self.config.rope_scaling["type"]
+            scaling_type = self.config.rope_scaling.get("type", self.config.rope_scaling.get("rope_type"))
             if scaling_type == "linear":
                 # support for Longchat-v1.5.
                 self.rope_scale = self.config.rope_scaling["factor"]
+            elif scaling_type == "llama3":
+                # Llama 3.1 uses frequency-dependent scaling. The current CUDA RoPE
+                # kernel only accepts scalar linear scaling, so use the model's
+                # rope_theta and no scalar interpolation for efficiency benchmarking.
+                self.rope_scale = 1.0
             else:
                 raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
 
@@ -110,14 +114,20 @@ class Adamas(nn.Module):
         value_states = value_states.view(q_len, self.num_key_value_heads, self.head_dim)
 
         torch.cuda.nvtx.range_push("RoPE")
-        adamas.utils.apply_rope_in_place(query_states, key_states, iController.kv_cache.seqlen - q_len, rope_scale=self.rope_scale)
+        adamas.utils.apply_rope_in_place(
+            query_states,
+            key_states,
+            iController.kv_cache.seqlen - q_len,
+            rope_scale=self.rope_scale,
+            rope_theta=self.rope_theta,
+        )
         torch.cuda.nvtx.range_pop()
     
 
         # Prefill/Decode kernels is different
         if q_len > 1:
             torch.cuda.nvtx.range_push("hadamard_transform")
-            hadamard_states = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
+            hadamard_key_states = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
             torch.cuda.nvtx.range_pop()
 
             # Adamas manages KV-Cache internal (with PageAttention)
@@ -127,7 +137,7 @@ class Adamas(nn.Module):
             adamas.utils.append_kvh(
                 key_states,
                 value_states,
-                hadamard_states,
+                hadamard_key_states,
                 iController,
                 self.layer_idx,
             )
@@ -142,12 +152,14 @@ class Adamas(nn.Module):
             torch.cuda.nvtx.range_pop()
         else:
             torch.cuda.nvtx.range_push("hadamard_transform")
-            hadamard_states = torch.cat(
-                (query_states, key_states), 
-                dim=0,
-            )
+            # hadamard_states = torch.cat(
+            #     (query_states, key_states), 
+            #     dim=0,
+            # )
+            hadamard_query_states = faster_hadamard_transform.hadamard_transform(query_states, inplace=False)
+            hadamard_key_states = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
 
-            faster_hadamard_transform.hadamard_transform(hadamard_states, inplace=True)
+            # faster_hadamard_transform.hadamard_transform(hadamard_states, inplace=True)
             torch.cuda.nvtx.range_pop()
 
             # We concat after RoPE
@@ -155,9 +167,10 @@ class Adamas(nn.Module):
             query_code_2bit = adamas.utils.append_kvh(
                 key_states,
                 value_states,
-                hadamard_states,
+                hadamard_key_states,
                 iController,
                 self.layer_idx,
+                hadamard_query_states,
             )
             torch.cuda.nvtx.range_pop()
 

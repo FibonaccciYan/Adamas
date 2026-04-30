@@ -1,6 +1,8 @@
 #include "bsk_ops.h"
 #include "pytorch_extension_utils.h"
 
+#include "decode/decode_attn.cuh"
+
 using namespace flashinfer;
 
 void estimate_attn_score(torch::Tensor q,
@@ -14,7 +16,7 @@ void estimate_attn_score(torch::Tensor q,
 	constexpr size_t batch_size = 1;
 
 	#ifdef BSK_TORCH_CHECK
-	CHECK_INPUT(q); // [1, num_heads, hadamard_dim]
+	CHECK_INPUT(q); // [1, num_qo_heads, hadamard_dim]
 	// (num_max_pages, 1, H_kv, page_size, hadamard_dim) for HND
 	// (num_max_pages, 1, page_size, H_kv, hadamard_dim) for NHD
 	CHECK_INPUT(hadamard_data);
@@ -28,33 +30,33 @@ void estimate_attn_score(torch::Tensor q,
 	CHECK_EQ(hadamard_indices.scalar_type(), torch::kInt32);
 	#endif
 
-	size_t num_heads = q.size(1);
+	size_t num_qo_heads = q.size(1);
 	size_t hadamard_dim = q.size(2);
-	size_t page_size;
+	size_t page_size, num_kv_heads;
 
 	QKVLayout kv_layout = static_cast<QKVLayout>(layout);
 	if(kv_layout == QKVLayout::kHND) {
 		page_size = hadamard_data.size(3);
+		num_kv_heads = hadamard_data.size(2);
 		#ifdef BSK_TORCH_CHECK
-		CHECK_EQ(hadamard_data.size(2), num_heads);
+		CHECK_EQ(num_qo_heads % num_kv_heads, 0);
 		CHECK_EQ(hadamard_data.size(4), hadamard_dim);
 		#endif
 	} else {
 		page_size = hadamard_data.size(2);
+		num_kv_heads = hadamard_data.size(3);
 		#ifdef BSK_TORCH_CHECK
-		CHECK_EQ(hadamard_data.size(3), num_heads);
+		CHECK_EQ(num_qo_heads % num_kv_heads, 0);
 		CHECK_EQ(hadamard_data.size(4), hadamard_dim);
 		#endif
 	}
 
-	// size_t output_len = (hadamard_indices.size(0) - 1) * page_size + hadamard_last_page_len - 1;
-	// torch::Tensor o = torch::empty(
-		// {static_cast<signed long>(num_heads), static_cast<signed long>(output_len)}, q.options());
+	uint32_t output_len = o.size(1);
 		
 	bool success = DISPATCH_PYTORCH_DTYPE_TO_CTYPE(q.scalar_type(), c_type, [&] {
 		SWITCH_LAYOUT(kv_layout, KV_LAYOUT, {
 			paged_kv_t<PageStorage::kIndices, KV_LAYOUT, c_type, int32_t> paged_hadamard(
-				num_heads,
+				num_kv_heads,
 				page_size,
 				hadamard_dim,
 				batch_size,
@@ -72,7 +74,8 @@ void estimate_attn_score(torch::Tensor q,
 												int32_t>(static_cast<c_type*>(q.data_ptr()),
 														paged_hadamard,
 														static_cast<c_type*>(o.data_ptr()),
-														num_heads,
+														num_qo_heads,
+														output_len,
 														/*rotary_mode*/ RotaryMode::kNone);
 			TORCH_CHECK(status == cudaSuccess,
 						"Estimate_attn_score failed with error code ",

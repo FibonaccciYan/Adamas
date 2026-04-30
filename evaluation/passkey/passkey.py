@@ -56,13 +56,13 @@ def test_model(pipe, prompt_text, pass_key, model, args):
     # response = pipe(prompt_text, num_return_sequences=1, max_new_tokens=10)[
     #     0]["generated_text"][len(prompt_text):]
 
-    if "qwen3" in model.lower():
-        prompt_text = pipe.tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt_text}],
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=args.thinking
-        )
+    # if "qwen3" in model.lower():
+    #     prompt_text = pipe.tokenizer.apply_chat_template(
+    #         [{"role": "user", "content": prompt_text}],
+    #         tokenize=False,
+    #         add_generation_prompt=True,
+    #         enable_thinking=args.thinking
+    #     )
 
     length = len(prompt_text)
     q_length = 400

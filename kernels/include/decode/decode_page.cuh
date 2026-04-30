@@ -332,6 +332,7 @@ struct paged_kv_t {
 				// This is manully appended last page. Only one page here
 				return data + get_k_elem_offset(last_page_idx, head_idx, entry_idx, feat_idx);
 			} else {
+				// Only valid when qo_head_idx == kv_head_idx, e.g. MHA.
 				// Note (Yilong):
 				// indices: [num_kv_heads, page_budget - 1]. Manully exclude the last page for sake of Top-k.
 				// Therefore, boundary check is last_indptr - 1 (since last_indptr is the last page index).
@@ -341,6 +342,32 @@ struct paged_kv_t {
 											 head_idx,
 											 entry_idx,
 											 feat_idx);
+				} else {
+					return data;
+				}
+			}
+		} else {
+			return nullptr; // "Not implemented for PageStorage::kPointer");
+		}
+	}
+
+	__device__ __forceinline__ DType* protective_get_k_ptr_qo_indices(IdType page_iter,
+																	  uint32_t kv_head_idx,
+																	  uint32_t qo_head_idx,
+																	  uint32_t entry_idx,
+																	  uint32_t feat_idx,
+																	  IdType last_indptr) const {
+		if constexpr(page_storage == PageStorage::kIndices) {
+			if (blockIdx.x == gridDim.x - 1) {
+				// This is manully appended last page. Only one page here
+				return data + get_k_elem_offset(last_page_idx, kv_head_idx, entry_idx, feat_idx);
+			} else {
+				// Note (Yilong):
+				// indices: [num_qo_heads, page_budget - 1]. Manully exclude the last page for sake of Top-k.
+				// Therefore, boundary check is last_indptr - 1 (since last_indptr is the last page index).
+				if (page_iter < last_indptr - 1) {
+					IdType page_idx = __ldg(indices + page_iter + qo_head_idx * page_budget);
+					return data + get_k_elem_offset(page_idx, kv_head_idx, entry_idx, feat_idx);
 				} else {
 					return data;
 				}
@@ -414,6 +441,7 @@ __device__ __forceinline__ void vec_bucketize_and_pack_2bit(DType* x, DType* o) 
  */
 template <uint32_t head_dim,
 		  uint32_t vec_size,
+		  uint32_t HEADS_PER_BLOCK,
 		  PageStorage page_storage,
 		  QKVLayout layout,
 		  typename DType,
@@ -423,12 +451,16 @@ AppendPagedKVCacheDecodeKernel(paged_kv_t<page_storage, layout, DType, IdType> p
 							   paged_kv_t<page_storage, layout, DType, IdType> paged_hadamard,
 							   DType* __restrict__ key,
 							   DType* __restrict__ value,
-							   DType* __restrict__ hadamard,
-							   DType* __restrict__ output) {
-	uint32_t tx = threadIdx.x, ty = threadIdx.y;
-	uint32_t num_heads = blockDim.y;
+							   DType* __restrict__ hadamard_query,
+							   DType* __restrict__ hadamard_key,
+							   DType* __restrict__ output,
+							   uint32_t num_qo_heads) {
+	uint32_t tx = threadIdx.x;
 	uint32_t batch_idx = blockIdx.x;
-	uint32_t head_idx = ty;
+	uint32_t head_idx = blockIdx.y * HEADS_PER_BLOCK + threadIdx.y;
+
+	uint32_t num_kv_heads = paged_kv.num_heads;
+	uint32_t hadamard_dim = paged_hadamard.head_dim;
 
 	uint32_t seq_len =
 		(paged_kv.indptr[batch_idx + 1] - paged_kv.indptr[batch_idx] - 1) * paged_kv.page_size +
@@ -444,28 +476,33 @@ AppendPagedKVCacheDecodeKernel(paged_kv_t<page_storage, layout, DType, IdType> p
 	uint32_t hadamard_page_iter = paged_hadamard.indptr[batch_idx + 1] - 1;
 	uint32_t hadamard_entry_idx = paged_hadamard.last_page_len - 1;
 
-	DType* k_ptr = paged_kv.get_k_ptr(page_iter, head_idx, entry_idx, tx * vec_size);
-	DType* v_ptr = k_ptr + paged_kv.kv_offset_delta();
 
-	vec_t<DType, vec_size>::memcpy(
-		k_ptr, key + (batch_idx * num_heads + head_idx) * head_dim + tx * vec_size);
-	vec_t<DType, vec_size>::memcpy(
-		v_ptr, value + (batch_idx * num_heads + head_idx) * head_dim + tx * vec_size);
+    if (head_idx < num_kv_heads) {
+		DType* k_ptr = paged_kv.get_k_ptr(page_iter, head_idx, entry_idx, tx * vec_size);
+		DType* v_ptr = k_ptr + paged_kv.kv_offset_delta();
 
-	int32_t hadamard_dim = head_dim / vec_size;
-	uint32_t hadamard_page_idx = __ldg(paged_hadamard.indices + hadamard_page_iter);
-	DType* h_ptr = paged_hadamard.data + ((hadamard_page_idx * paged_hadamard.page_size + hadamard_entry_idx) * num_heads + head_idx) * hadamard_dim;
-	DType* o_ptr = output + (0 * num_heads + head_idx) * hadamard_dim;
+		vec_t<DType, vec_size>::memcpy(
+			k_ptr, key + (batch_idx * num_kv_heads + head_idx) * head_dim + tx * vec_size);
+		vec_t<DType, vec_size>::memcpy(
+			v_ptr, value + (batch_idx * num_kv_heads + head_idx) * head_dim + tx * vec_size);
 
-	// hadamard query 2bit
-	vec_bucketize_and_pack_2bit<vec_size, DType>(
-		hadamard + ((batch_idx * seq_len + 0) * num_heads + head_idx) * head_dim, 
-		o_ptr);
+		uint32_t hadamard_page_idx = __ldg(paged_hadamard.indices + hadamard_page_iter);
+		DType* hk_ptr = paged_hadamard.data + ((hadamard_page_idx * paged_hadamard.page_size + hadamard_entry_idx) * num_kv_heads + head_idx) * hadamard_dim;
 
-	// hadamard key 2bit
-	vec_bucketize_and_pack_2bit<vec_size, DType>(
-		hadamard + ((batch_idx * seq_len + 1) * num_heads + head_idx) * head_dim, 
-		h_ptr);
+		// hadamard key 2bit
+		vec_bucketize_and_pack_2bit<vec_size, DType>(
+			hadamard_key + (batch_idx * num_kv_heads + head_idx) * head_dim, 
+			hk_ptr);
+	}
+
+	if (head_idx < num_qo_heads) {
+		DType* o_ptr = output + (batch_idx * num_qo_heads + head_idx) * hadamard_dim;
+
+		// hadamard query 2bit
+		vec_bucketize_and_pack_2bit<vec_size, DType>(
+			hadamard_query + (batch_idx * num_qo_heads + head_idx) * head_dim, 
+			o_ptr);
+	}
 }
 
 /*!
@@ -533,11 +570,9 @@ AppendPagedKVCachePrefillKernel(paged_kv_t<page_storage, layout, DType, IdType> 
 
 			vec_t<DType, vec_size>::memcpy(k_ptr, key + input_offset);
 			vec_t<DType, vec_size>::memcpy(v_ptr, value + input_offset);
-
-			int32_t hadamard_dim = head_dim / 8;
 				
 			uint32_t hadamard_page_idx = __ldg(paged_hadamard.indices + hadamard_page_iter);
-			DType* h_ptr = paged_hadamard.data + ((hadamard_page_idx * paged_hadamard.page_size + entry_idx) * num_heads + head_idx) * hadamard_dim;
+			DType* h_ptr = paged_hadamard.data + ((hadamard_page_idx * paged_hadamard.page_size + entry_idx) * num_heads + head_idx) * paged_hadamard.head_dim;
 
 			// hadamard key 2bit
 			vec_bucketize_and_pack_2bit<vec_size, DType>(
@@ -568,22 +603,28 @@ cudaError_t AppendPagedKVCacheDecode(paged_kv_t<page_storage, layout, DType, IdT
 									 paged_kv_t<page_storage, layout, DType, IdType> paged_hadamard,
 									 DType* key,
 									 DType* value,
-									 DType* hadamard,
+									 DType* hadamard_query,
+									 DType* hadamard_key,
 									 DType* output,
+									 uint32_t num_qo_heads,
 									 cudaStream_t stream = nullptr) {
 	uint32_t head_dim = paged_kv.head_dim;
 	uint32_t batch_size = paged_kv.batch_size;
-	uint32_t num_heads = paged_kv.num_heads;
+	uint32_t num_kv_heads = paged_kv.num_heads;
+
 	SWITCH_HEAD_DIM(head_dim, HEAD_DIM, {
 		constexpr uint32_t vec_size = std::max(16 / sizeof(DType), HEAD_DIM / 32);
 		uint32_t bdx = HEAD_DIM / vec_size;
-		uint32_t bdy = num_heads;
-		dim3 nblks(batch_size);
-		dim3 nthrs(bdx, bdy);
+
+		constexpr uint32_t HEADS_PER_BLOCK = 4;
+		uint32_t nby = ceil_div(std::max(num_qo_heads, num_kv_heads), HEADS_PER_BLOCK);
+
+		dim3 nblks(batch_size, nby);
+		dim3 nthrs(bdx, HEADS_PER_BLOCK);
+
 		auto kernel =
-			AppendPagedKVCacheDecodeKernel<HEAD_DIM, vec_size, page_storage, layout, DType, IdType>;
-		void* args[] = {(void*)&paged_kv, (void*)&paged_hadamard, (void*)&key, (void*)&value, (void*)&hadamard, 
-						(void*)&output};
+			AppendPagedKVCacheDecodeKernel<HEAD_DIM, vec_size, HEADS_PER_BLOCK, page_storage, layout, DType, IdType>;
+		void* args[] = {(void*)&paged_kv, (void*)&paged_hadamard, (void*)&key, (void*)&value, (void*)&hadamard_query, (void*)&hadamard_key, (void*)&output, (void*)&num_qo_heads};
 		FLASHINFER_CUDA_CALL(cudaLaunchKernel((void*)kernel, nblks, nthrs, args, 0, stream));
 	});
 	return cudaSuccess;
@@ -614,12 +655,12 @@ cudaError_t AppendPagedKVCachePrefill(paged_kv_t<page_storage, layout, DType, Id
 									  cudaStream_t stream = nullptr) {
 	uint32_t head_dim = paged_kv.head_dim;
 	uint32_t batch_size = paged_kv.batch_size;
-	uint32_t num_heads = paged_kv.num_heads;
+	uint32_t num_kv_heads = paged_kv.num_heads;
 	SWITCH_HEAD_DIM(head_dim, HEAD_DIM, {
 		constexpr uint32_t vec_size = std::max(16 / sizeof(DType), HEAD_DIM / 32);  // 8
 		uint32_t bdx = HEAD_DIM / vec_size;  // 128 / 8 = 16
 		uint32_t bdy = 512 / bdx; // page stride // 512 / 16 = 32
-		dim3 nblks(batch_size, num_heads); // 1 32
+		dim3 nblks(batch_size, num_kv_heads); // 1 32
 		dim3 nthrs(bdx, bdy); // 16 32
 		auto kernel = AppendPagedKVCachePrefillKernel<HEAD_DIM,
 													  vec_size,

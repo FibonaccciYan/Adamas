@@ -22,6 +22,8 @@
 #include "bsk_ops.h"
 #include "pytorch_extension_utils.h"
 
+#include "prefill/prefill.cuh"
+
 using namespace flashinfer;
 
 torch::Tensor prefill_with_paged_kv_cache(torch::Tensor q,

@@ -539,7 +539,8 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         
         self.model.iController = InferenceController(
             num_layers=config.num_hidden_layers,
-            num_heads=config.num_attention_heads,
+            num_qo_heads=config.num_attention_heads,
+            num_kv_heads=config.num_key_value_heads,
             head_dim=config.hidden_size // config.num_attention_heads,
             page_size=page_size,
             page_budget=self.model._Adamas_page_budget,

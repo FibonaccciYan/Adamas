@@ -14,11 +14,9 @@
  * limitations under the License.
  */
 #pragma once
-#include <torch/extension.h>
+#include <memory>
 
-#include "decode/decode_handler.cuh"
-#include "prefill/prefill.cuh"
-#include "topk/decode_select_k.cuh"
+#include <torch/extension.h>
 
 void apply_rope_in_place(torch::Tensor q,
 						 torch::Tensor k,
@@ -68,7 +66,8 @@ void append_kv_cache_prefill(torch::Tensor k,
 
 void append_kv_cache_decode(torch::Tensor k,
 							torch::Tensor v,
-							torch::Tensor h,
+							torch::Tensor h_q,
+							torch::Tensor h_k,
 							torch::Tensor o,
 							torch::Tensor kv_data,
 							torch::Tensor kv_indices,
@@ -94,9 +93,12 @@ torch::Tensor prefill_with_paged_kv_cache(torch::Tensor q,
 
 class BatchDecodeWithPagedKVCachePyTorchWrapper {
 public:
-	static BatchDecodeWithPagedKVCachePyTorchWrapper Create(unsigned int layout) {
-		return BatchDecodeWithPagedKVCachePyTorchWrapper(layout);
-	}
+	static BatchDecodeWithPagedKVCachePyTorchWrapper Create(unsigned int layout);
+	BatchDecodeWithPagedKVCachePyTorchWrapper(BatchDecodeWithPagedKVCachePyTorchWrapper&&) noexcept;
+	BatchDecodeWithPagedKVCachePyTorchWrapper&
+	operator=(BatchDecodeWithPagedKVCachePyTorchWrapper&&) noexcept;
+	~BatchDecodeWithPagedKVCachePyTorchWrapper();
+
 	void BeginForward(torch::Tensor indptr,
 					  unsigned int num_qo_heads,
 					  unsigned int num_kv_heads,
@@ -117,8 +119,8 @@ public:
 				 float rope_theta);
 
 private:
-	BatchDecodeWithPagedKVCachePyTorchWrapper(unsigned int layout)
-		: kv_layout_(flashinfer::QKVLayout(layout)) { }
-	flashinfer::BatchDecodeHandler handler_;
-	flashinfer::QKVLayout kv_layout_;
+	explicit BatchDecodeWithPagedKVCachePyTorchWrapper(unsigned int layout);
+
+	struct Impl;
+	std::unique_ptr<Impl> impl_;
 };

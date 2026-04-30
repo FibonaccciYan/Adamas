@@ -22,7 +22,34 @@
 #include "bsk_ops.h"
 #include "pytorch_extension_utils.h"
 
+#include "decode/decode_handler.cuh"
+
 using namespace flashinfer;
+
+struct BatchDecodeWithPagedKVCachePyTorchWrapper::Impl {
+	explicit Impl(unsigned int layout) : kv_layout(static_cast<QKVLayout>(layout)) { }
+
+	BatchDecodeHandler handler;
+	QKVLayout kv_layout;
+};
+
+BatchDecodeWithPagedKVCachePyTorchWrapper
+BatchDecodeWithPagedKVCachePyTorchWrapper::Create(unsigned int layout) {
+	return BatchDecodeWithPagedKVCachePyTorchWrapper(layout);
+}
+
+BatchDecodeWithPagedKVCachePyTorchWrapper::BatchDecodeWithPagedKVCachePyTorchWrapper(
+	unsigned int layout)
+	: impl_(std::make_unique<Impl>(layout)) { }
+
+BatchDecodeWithPagedKVCachePyTorchWrapper::BatchDecodeWithPagedKVCachePyTorchWrapper(
+	BatchDecodeWithPagedKVCachePyTorchWrapper&&) noexcept = default;
+
+BatchDecodeWithPagedKVCachePyTorchWrapper&
+BatchDecodeWithPagedKVCachePyTorchWrapper::operator=(
+	BatchDecodeWithPagedKVCachePyTorchWrapper&&) noexcept = default;
+
+BatchDecodeWithPagedKVCachePyTorchWrapper::~BatchDecodeWithPagedKVCachePyTorchWrapper() = default;
 
 void BatchDecodeWithPagedKVCachePyTorchWrapper::BeginForward(torch::Tensor indptr,
 															 unsigned int num_qo_heads,
@@ -39,9 +66,10 @@ void BatchDecodeWithPagedKVCachePyTorchWrapper::BeginForward(torch::Tensor indpt
 	#endif
 
 	bool success = DISPATCH_PYTORCH_DTYPE_TO_CTYPE(empty_data.scalar_type(), c_type, [&] {
-		SWITCH_LAYOUT(kv_layout_, KV_LAYOUT, {
+		SWITCH_LAYOUT(impl_->kv_layout, KV_LAYOUT, {
 			cudaError_t status =
-				handler_.BeginForward<PageStorage::kIndices, KV_LAYOUT, c_type, c_type, int32_t>(
+				impl_->handler
+					.BeginForward<PageStorage::kIndices, KV_LAYOUT, c_type, c_type, int32_t>(
 					static_cast<int32_t*>(indptr.data_ptr()),
 					batch_size,
 					num_qo_heads,
@@ -62,7 +90,7 @@ void BatchDecodeWithPagedKVCachePyTorchWrapper::BeginForward(torch::Tensor indpt
 }
 
 void BatchDecodeWithPagedKVCachePyTorchWrapper::EndForward() {
-	handler_.EndForward();
+	impl_->handler.EndForward();
 }
 
 void
@@ -95,7 +123,7 @@ BatchDecodeWithPagedKVCachePyTorchWrapper::Forward(torch::Tensor q,
 	// actual page budget is page_budget + 1
 	int64_t page_budget = paged_kv_indices.size(1);
 
-	if(kv_layout_ == QKVLayout::kHND) {
+	if(impl_->kv_layout == QKVLayout::kHND) {
 		num_kv_heads = paged_kv_data.size(2);
 		page_size = paged_kv_data.size(3);
 	} else {
@@ -111,7 +139,7 @@ BatchDecodeWithPagedKVCachePyTorchWrapper::Forward(torch::Tensor q,
 	#endif
 
 	bool success = DISPATCH_PYTORCH_DTYPE_TO_CTYPE(q.scalar_type(), c_type, [&] {
-		SWITCH_LAYOUT(kv_layout_, KV_LAYOUT, {
+		SWITCH_LAYOUT(impl_->kv_layout, KV_LAYOUT, {
 			paged_kv_t<PageStorage::kIndices, KV_LAYOUT, c_type, int32_t> paged_kv(
 				num_kv_heads,
 				page_size,
@@ -129,7 +157,7 @@ BatchDecodeWithPagedKVCachePyTorchWrapper::Forward(torch::Tensor q,
 												   KV_LAYOUT,
 												   c_type,
 												   c_type,
-												   int32_t>(&handler_,
+												   int32_t>(&impl_->handler,
 															static_cast<c_type*>(q.data_ptr()),
 															paged_kv,
 															static_cast<c_type*>(o.data_ptr()),

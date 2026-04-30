@@ -9,7 +9,7 @@ class KvPool:
   def __init__(
       self,
       num_layers: int,
-      num_heads: int,
+      num_kv_heads: int,
       head_dim: int,
       capacity: int,
       items: int,
@@ -19,7 +19,7 @@ class KvPool:
   ):
     self._layout = TensorLayout.NHD
     self._buf = torch.empty(
-        (num_layers, capacity, items, block_len, num_heads, head_dim),
+        (num_layers, capacity, items, block_len, num_kv_heads, head_dim),
         dtype=dtype,
         device=device)
     
@@ -69,7 +69,7 @@ class KvCache:
   def __init__(
       self,
       num_layers,
-      num_heads,
+      num_kv_heads,
       head_dim,
       max_seq_len: int,
       page_size,
@@ -83,7 +83,7 @@ class KvCache:
 
     self._pool = KvPool(
         num_layers=num_layers,
-        num_heads=num_heads,
+        num_kv_heads=num_kv_heads,
         head_dim=head_dim,
         capacity=(max_seq_len + page_size - 1) // page_size,
         items=items,

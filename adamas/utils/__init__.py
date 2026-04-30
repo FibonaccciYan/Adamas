@@ -94,35 +94,37 @@ def rms_norm_forward(
 def append_kvh(
     k: torch.Tensor,
     v: torch.Tensor,
-    h: torch.Tensor,
+    h_k: torch.Tensor,
     iController: InferenceController,
     layer_idx: int,
+    h_q: Optional[torch.Tensor] = None, # Only used for decode stage
 ):
     """
-    Semantics of `append_kv`:
-    Append new generated k/v into kvh cache.
+    Semantics of `append_kvh`:
+    Append new generated k/v/h_k into kvh cache.
     Automatically dispatch to Prefill / Decode Kernel
 
     Notations for shapes:
     `N`: sequence length
-    `H`: number of heads
+    `H_q`: number of query heads
+    `H_{kv}`: number of key/value heads
     `D`: head dimension
     `MAXLEN`: maximum length of the KV cache
 
     Args:
-        k: Shape: `[N, H, D]`. Key projection (`X @ W_k`).
-        v: Shape: `[N, H, D]`. Value projection (`X @ W_v`).
-        h: Shape: 1. Prefill stage: `[N, H, D]`. Hadamard projection (`hadamard_transform(k)`). 
-                  2. Decode stage: `[2N, H, D]`. Hadamard projection (`hadamard_transform(cat((q, k), dim=0))`).
+        k: Shape: `[N, Hkv, D]`. Key projection (`X @ W_k`).
+        v: Shape: `[N, Hkv, D]`. Value projection (`X @ W_v`).
+        h_q: Shape: `[N, H_q, D]`. Hadamard projection of Query (`hadamard_transform(q)`). 
+        h_k: Sahpe: `[N, H_{kv}, D]`. Hadamard projection of Key (`hadamard_transform(k)`).
         iController: InferenceController object, which contains all needed information.
         layer_idx: Layer index of the KV cache.
     """
-    seq_len, num_heads, head_dim = k.shape
+    seq_len, num_kv_heads, head_dim = k.shape
     if seq_len > 1:
         _kernels.append_kv_cache_prefill(
             k,
             v,
-            h,
+            h_k,
             iController.kv_cache.buf_layer(layer_idx),
             iController.kv_indices_with_last,
             iController.kv_indptr_for_append,
@@ -136,11 +138,12 @@ def append_kvh(
             iController.layout
         )
     else:
-        o = torch.empty(seq_len, num_heads, head_dim // 8, dtype=h.dtype, device=h.device)
+        o = torch.empty(seq_len, iController.num_qo_heads, head_dim // 8, dtype=h_q.dtype, device=h_q.device)
         _kernels.append_kv_cache_decode(
             k,
             v,
-            h,
+            h_q,
+            h_k,
             o,
             iController.kv_cache.buf_layer(layer_idx),
             iController.kv_indices_with_last,
@@ -223,7 +226,7 @@ def decode_estimate(
     """
     f = _kernels.estimate_attn_score
     # (iController.metadata_cache.seqlen - 1) is manually excluding the last elements, which is the current page.
-    o = torch.empty((iController.num_heads, iController.hadamard_cache.seqlen - 1), dtype=q.dtype, device=q.device)
+    o = torch.empty((iController.num_qo_heads, iController.hadamard_cache.seqlen - 1), dtype=q.dtype, device=q.device)
     f(
         q,
         o,

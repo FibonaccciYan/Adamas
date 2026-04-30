@@ -8,7 +8,8 @@ class InferenceController:
     def __init__(
         self,
         num_layers,
-        num_heads,
+        num_qo_heads,
+        num_kv_heads,
         head_dim,
         page_size,
         page_budget, # Real page budget including the last page
@@ -19,7 +20,7 @@ class InferenceController:
         max_kv_pages_num = (max_seq_len + page_size - 1) // page_size
         self.kv_cache = KvCache(
             num_layers=num_layers,
-            num_heads=num_heads,
+            num_kv_heads=num_kv_heads,
             head_dim=head_dim,
             max_seq_len=max_seq_len,
             page_size=page_size,
@@ -29,7 +30,7 @@ class InferenceController:
         )
         self.hadamard_cache = KvCache(
             num_layers=num_layers,
-            num_heads=num_heads,
+            num_kv_heads=num_kv_heads,
             head_dim=head_dim//8,
             max_seq_len=max_kv_pages_num,
             page_size=page_size,
@@ -41,7 +42,9 @@ class InferenceController:
         self.device = device
         self.dtype = dtype
 
-        self.num_heads = num_heads
+        self.num_qo_heads = num_qo_heads
+        self.num_kv_heads = num_kv_heads
+        self.num_key_value_groups = num_qo_heads // num_kv_heads
         self.head_dim = head_dim
         self.page_size = page_size
 
@@ -105,7 +108,7 @@ class InferenceController:
                 self.kv_indices_with_last = torch.tensor(self.kv_cache.indicies, dtype=torch.int32, device=self.device)
 
                 # Only used for top-k filtering (because we manully exclude the last page) as input index
-                self.kv_indices_without_last = torch.tensor(self.kv_cache.indicies[:-1], dtype=torch.int32, device=self.device).repeat(self.num_heads, 1)
+                self.kv_indices_without_last = torch.tensor(self.kv_cache.indicies[:-1], dtype=torch.int32, device=self.device).repeat(self.num_qo_heads, 1)
 
                 # used for estimate
                 self.hadamard_indices = torch.tensor(self.hadamard_cache.indicies, dtype=torch.int32, device=self.device)
@@ -117,14 +120,14 @@ class InferenceController:
             self.kv_indptr_for_approx_decode = torch.tensor([0, self.inference_page_budget - 1], dtype=torch.int32, device=self.device)
 
             # Allocate buffer for top-k filtering
-            self.topk_dout_buffer = torch.zeros((self.num_heads, self.inference_page_budget - 1), dtype=self.dtype, device=self.device)
-            self.topk_dindices_buffer = torch.zeros((self.num_heads, self.inference_page_budget - 1), dtype=torch.int32, device=self.device)
-            self.topk_buf = torch.zeros((self.num_heads, 8192 * 2 * (2+4) // 2 // 48), dtype=self.dtype, device=self.device)
+            self.topk_dout_buffer = torch.zeros((self.num_qo_heads, self.inference_page_budget - 1), dtype=self.dtype, device=self.device)
+            self.topk_dindices_buffer = torch.zeros((self.num_qo_heads, self.inference_page_budget - 1), dtype=torch.int32, device=self.device)
+            self.topk_buf = torch.zeros((self.num_qo_heads, 8192 * 2 * (2+4) // 2 // 48), dtype=self.dtype, device=self.device)
 
             self._decode_handler.begin_forward(
                 self.kv_indptr_for_approx_decode,
-                self.num_heads,
-                self.num_heads,
+                self.num_qo_heads,
+                self.num_kv_heads,
                 self.head_dim,
                 self.page_size,
                 self.dtype

@@ -288,6 +288,7 @@ template <bool partition_kv,
 		  RotaryMode rotary_mode,
 		  uint32_t num_stages_smem,
 		  uint32_t tile_size_per_bdx,
+		  uint32_t CHUNK_SIZE,
 		  uint32_t vec_size,
 		  uint32_t bdx,
 		  uint32_t bdy,
@@ -300,31 +301,30 @@ template <bool partition_kv,
 __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 	DTypeIn* __restrict__ q,
 	paged_kv_t<page_storage, kv_layout, DTypeIn, IdType> paged_hadamard,
-	DTypeOut* __restrict__ o) {
+	DTypeOut* __restrict__ o,
+	uint32_t total_h_len
+) {
 
 	static_assert(partition_kv == false && rotary_mode == RotaryMode::kNone);
 	auto block = cg::this_thread_block();
 
 	constexpr uint32_t head_dim = bdx * vec_size;
-	const uint32_t batch_idx = blockIdx.x;
+	// const uint32_t batch_idx = blockIdx.x;
+	const uint32_t batch_idx = 0;  // current estimate path only supports batch_size=1
+	const uint32_t chunk_idx = blockIdx.x;
 	const uint32_t h_head_idx = blockIdx.y;
 	const uint32_t qo_head_idx = h_head_idx * bdy + threadIdx.y;
 	const uint32_t num_qo_heads = gridDim.y * bdy;
-	const uint32_t cur_chunk_start = 0U; // Not partition-kv now.
+	// const uint32_t cur_chunk_start = 0U; // Not partition-kv now.
+	const uint32_t cur_chunk_start = chunk_idx * CHUNK_SIZE;
+	if (cur_chunk_start >= total_h_len) {
+		return;
+	}
+	const uint32_t h_chunk_len = min(CHUNK_SIZE, total_h_len - cur_chunk_start);
 
 	const uint32_t cur_page_indptr_begin = paged_hadamard.indptr[batch_idx],
 				   cur_page_indptr_end = paged_hadamard.indptr[batch_idx + 1];
 
-	// paged_hadamard.last_page_len - 1: hard-code for not considering the last entry
-	// which is the last page of original hadamard-cache.
-	// Note that last_page_len should be \in [1, PAGE_SIZE]
-	const uint32_t cur_last_page_len =
-		(batch_idx == gridDim.x - 1) ? (paged_hadamard.last_page_len - 1) : paged_hadamard.page_size;
-	const uint32_t h_chunk_len =
-		cur_page_indptr_begin != cur_page_indptr_end
-			? (cur_page_indptr_end - cur_page_indptr_begin - 1) * paged_hadamard.page_size +
-				  cur_last_page_len
-			: 0;
 	extern __shared__ uint8_t smem[];
 
 	DTypeIn* h_smem = (DTypeIn*)smem;
@@ -349,8 +349,14 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 #pragma unroll
 	for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
 		// page_storage == PageStorage::kIndices
-		uint32_t page_iter = cur_page_indptr_begin + (((j * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
-		uint32_t entry_idx = (((j * bdz + tz) * bdy + ty) * bdx + tx) % paged_hadamard.page_size;
+		// uint32_t page_iter = cur_page_indptr_begin + (((j * bdz + tz) * bdy + ty) * bdx + tx) / paged_hadamard.page_size;
+		// uint32_t entry_idx = (((j * bdz + tz) * bdy + ty) * bdx + tx) % paged_hadamard.page_size;
+		uint32_t local_linear = ((j * bdz + tz) * bdy + ty) * bdx + tx;
+		uint32_t global_linear = cur_chunk_start + local_linear;
+
+		uint32_t page_iter = cur_page_indptr_begin + global_linear / paged_hadamard.page_size;
+		uint32_t entry_idx = global_linear % paged_hadamard.page_size;
+
 		if(page_iter < last_indptr) {
 			// layout == QKVLayout::kNHD
 			// protective_get_k_ptr
@@ -388,13 +394,22 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 #pragma unroll
 			for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
 				// page_storage == PageStorage::kIndices
-				uint32_t page_iter = cur_page_indptr_begin +
-									((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
-									((j * bdz + tz) * bdy + ty) * bdx + tx) /
-										paged_hadamard.page_size;
-				uint32_t entry_idx = ((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
-									((j * bdz + tz) * bdy + ty) * bdx + tx) %
-									paged_hadamard.page_size;
+				// uint32_t page_iter = cur_page_indptr_begin +
+				// 					((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
+				// 					((j * bdz + tz) * bdy + ty) * bdx + tx) /
+				// 						paged_hadamard.page_size;
+				// uint32_t entry_idx = ((iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
+				// 					((j * bdz + tz) * bdy + ty) * bdx + tx) %
+				// 					paged_hadamard.page_size;
+				uint32_t local_linear =
+					(iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
+					((j * bdz + tz) * bdy + ty) * bdx + tx;
+
+				uint32_t global_linear = cur_chunk_start + local_linear;
+
+				uint32_t page_iter = cur_page_indptr_begin + global_linear / paged_hadamard.page_size;
+				uint32_t entry_idx = global_linear % paged_hadamard.page_size;
+
 									
 				if(page_iter < last_indptr) {
 					// layout == QKVLayout::kNHD
@@ -415,8 +430,10 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 			cur_chunk_start + iter * tile_size_per_bdx * bdy * bdz,
 			iter * tile_size_per_bdx * bdy * bdz,
 			h_chunk_len,
-			o + (num_qo_heads * batch_idx + qo_head_idx) *
-					h_chunk_len); // Note that o is [num_heads, h_chunk_len]. Exclude last page.
+			// o + (num_qo_heads * batch_idx + qo_head_idx) *
+			// 		h_chunk_len); // Note that o is [num_heads, h_chunk_len]. Exclude last page.
+			o + (num_qo_heads * batch_idx + qo_head_idx) * total_h_len
+		);
 		block.sync();
 
 #pragma unroll
@@ -560,7 +577,7 @@ BatchDecodeWithPagedKVCacheKernel(DTypeIn* __restrict__ q,
 
         if (page_ok) {
             k_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] =
-                paged_kv.protective_get_k_ptr_heads(page_iter, kv_head_idx, entry_idx, 0, last_indptr);
+                paged_kv.protective_get_k_ptr_qo_indices(page_iter, kv_head_idx, qo_head_idx, entry_idx, 0, last_indptr);
         } else {
             k_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_kv.data;
         }
@@ -618,7 +635,7 @@ BatchDecodeWithPagedKVCacheKernel(DTypeIn* __restrict__ q,
 
                 if (page_ok) {
                     k_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] =
-                        paged_kv.protective_get_k_ptr_heads(page_iter, kv_head_idx, entry_idx, 0, last_indptr);
+                        paged_kv.protective_get_k_ptr_qo_indices(page_iter, kv_head_idx, qo_head_idx, entry_idx, 0, last_indptr);
                 } else {
                     k_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_kv.data;
                 }
@@ -1151,6 +1168,7 @@ MaxPossibleSampleWithPagedKVCache(DTypeIn* q,
 								  paged_kv_t<page_storage, kv_layout, DTypeIn, IdType> paged_hadamard,
 								  DTypeOut* o,
 								  uint32_t num_qo_heads,
+                                  uint32_t output_len,
 								  RotaryMode rotary_mode = RotaryMode::kNone,
 								  cudaStream_t stream = nullptr) {
 	const uint32_t num_kv_heads = paged_hadamard.num_heads;
@@ -1176,20 +1194,33 @@ MaxPossibleSampleWithPagedKVCache(DTypeIn* q,
 			constexpr uint32_t bdx = HEAD_DIM / vec_size; // 16 -> 2
 			static_assert(bdx <= 32);
 			constexpr uint32_t bdy = GROUP_SIZE; // 1
-			constexpr uint32_t num_threads = std::max(128U, bdx * bdy); // 128
-			constexpr uint32_t bdz = num_threads / (bdx * bdy); // 8 -> 64
-			constexpr uint32_t tile_size_per_bdx =
-				(GROUP_SIZE == 1 ? (sizeof(DTypeIn) == 1 ? 2U : 4U) : 1U);
+			// constexpr uint32_t num_threads = std::max(128U, bdx * bdy); // 128
+			// constexpr uint32_t bdz = num_threads / (bdx * bdy); // 8 -> 64
+			// constexpr uint32_t tile_size_per_bdx =
+			// 	(GROUP_SIZE == 1 ? (sizeof(DTypeIn) == 1 ? 2U : 4U) : 1U);
+
+			constexpr uint32_t CHUNK_SIZE = 512U;
+			constexpr uint32_t num_threads = 128U;
+			constexpr uint32_t tile_size_per_bdx = 4U;
+			
+			constexpr uint32_t bdz = num_threads / (bdx * bdy);
+			constexpr uint32_t entries_per_iter = tile_size_per_bdx * bdy * bdz;
+			static_assert(CHUNK_SIZE % entries_per_iter == 0);
+
+			uint32_t num_chunks = ceil_div(output_len, CHUNK_SIZE);
+
 			// constexpr uint32_t tile_size_per_bdx = 16U;
 			const uint32_t smem_size =
 				2 * num_stages_smem * tile_size_per_bdx * bdy * bdz * head_dim * sizeof(DTypeIn) +
 				tile_size_per_bdx * num_threads * sizeof(DTypeIn*); // 36KB
-			dim3 nblks(batch_size, num_kv_heads);	// (1, 32)
+			// dim3 nblks(batch_size, num_kv_heads);	// (1, 32)
+			dim3 nblks(num_chunks, num_kv_heads);
 			dim3 nthrs(bdx, bdy, bdz);				// (2, 1, 64)
 			auto kernel = MaxPossibleSampleWithPagedKVCacheKernel<false,
 																  RotaryMode::kNone,
 																  num_stages_smem,
 																  tile_size_per_bdx,
+																  CHUNK_SIZE,
 																  vec_size,
 																  bdx,
 																  bdy,
@@ -1201,7 +1232,7 @@ MaxPossibleSampleWithPagedKVCache(DTypeIn* q,
 																  IdType>;
 			FLASHINFER_CUDA_CALL(cudaFuncSetAttribute(
 				kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
-			void* args[] = {(void*)&q, (void*)&paged_hadamard, (void*)&o};
+			void* args[] = {(void*)&q, (void*)&paged_hadamard, (void*)&o, (void*)&output_len};
 			nvtxRangePushA("compute_manhatton_distances");
 			FLASHINFER_CUDA_CALL(
 				cudaLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream));

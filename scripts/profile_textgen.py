@@ -25,10 +25,10 @@ class ModelConfig:
   device: str = dataclasses.field(default="cuda:0")
 
 MODEL_CFGS = {
-    "llama2-7b":
+    "Llama-3.1-8B-Instruct":
         ModelConfig(
-            model_path="/path/to/llama2/meta-llama/Llama-2-7b-chat-hf"
-        ),
+            model_path="/data1/model/llama3/meta-llama/Llama-3.1-8B-Instruct"
+        )
 }
 
 def load_model(model_cfg: ModelConfig):
@@ -47,7 +47,7 @@ def load_model(model_cfg: ModelConfig):
 @torch.inference_mode()
 def benchmark_Adamas():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=MODEL_CFGS.keys(), default="llama2-7b")
+    parser.add_argument("--model", choices=MODEL_CFGS.keys(), default="Llama-3.1-8B-Instruct")
     parser.add_argument("--context_len", type=int, default=2*1024)
     parser.add_argument("--decode_len", type=int, default=256)
     parser.add_argument("--page_size", type=int, default=16)
@@ -106,7 +106,7 @@ def benchmark_Adamas():
                     te = time.perf_counter()
                     decode_latency.append(te - ts)
                     prof.step()
-        prof.export_chrome_trace(f"../test_results/profile_{token_budget}-{context_len}.json")
+        prof.export_chrome_trace(f"../test_results/{args.model}/profile_{token_budget}-{context_len}.json")
         model.Adamas_clear()
     
     avg_prefill_latency = np.mean(prefill_latency)

@@ -1,7 +1,7 @@
 #include "bsk_ops.h"
 #include "pytorch_extension_utils.h"
 
-using namespace flashinfer;
+#include "topk/decode_select_k.cuh"
 
 // Note that estimated_indices does not contain the last page
 void topk_filtering(torch::Tensor estimated_value,
