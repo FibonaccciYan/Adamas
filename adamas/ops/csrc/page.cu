@@ -130,6 +130,124 @@ void append_kv_cache_decode(torch::Tensor k,
 	TORCH_CHECK(success, "Append_kv_cache_decode failed to dispatch with dtype ", k.scalar_type());
 }
 
+void append_kv_cache_decode_fused(torch::Tensor q,
+								torch::Tensor k,
+								torch::Tensor v,
+								torch::Tensor o,
+								torch::Tensor kv_data,
+								torch::Tensor kv_indices,
+								torch::Tensor kv_indptr,
+								unsigned int kv_last_page_len,
+								unsigned int kv_last_page_idx,
+								torch::Tensor hadamard_data,
+								torch::Tensor hadamard_indices,
+								torch::Tensor hadamard_indptr,
+								unsigned int hadamard_last_page_len,
+								unsigned int hadamard_last_page_idx,
+								unsigned int layout) {
+	constexpr size_t batch_size = 1;
+	CHECK_INPUT(q); // [seq_len, num_qo_heads, head_dim]
+	CHECK_INPUT(k); // [seq_len, num_kv_heads, head_dim]
+	CHECK_INPUT(v); // [seq_len, num_kv_heads, head_dim]
+	CHECK_INPUT(o); // [seq_len, num_qo_heads, head_dim/8]
+	// (num_max_pages, 2, H_kv, page_size, head_dim) for HND
+	// (num_max_pages, 2, page_size, H_kv, head_dim) for NHD
+	CHECK_INPUT(kv_data);
+	CHECK_INPUT(kv_indices); // [num_pages]
+	CHECK_INPUT(hadamard_data);
+	CHECK_INPUT(hadamard_indices); // [num_pages]
+
+	CHECK_DIM(1, kv_indices);
+	CHECK_DIM(1, hadamard_indices);
+	CHECK_DIM(3, q);
+	CHECK_DIM(3, k);
+	CHECK_DIM(3, v);
+	CHECK_DIM(3, o);
+	CHECK_DIM(5, kv_data);
+	CHECK_DIM(5, hadamard_data);
+
+	CHECK_EQ(q.size(0), 1); // decode
+	CHECK_EQ(k.size(0), 1); // decode
+	CHECK_EQ(v.size(0), 1); // decode
+	CHECK_EQ(o.size(0), 1); // decode
+	CHECK_EQ(kv_indices.scalar_type(), torch::kInt32);
+	CHECK_EQ(hadamard_indices.scalar_type(), torch::kInt32);
+	CHECK_EQ(kv_indptr.scalar_type(), torch::kInt32);
+	CHECK_EQ(hadamard_indptr.scalar_type(), torch::kInt32);
+
+	size_t num_qo_heads = q.size(1);
+	size_t num_kv_heads = k.size(1);
+	size_t head_dim = k.size(2);
+
+	CHECK_EQ(q.size(1) % k.size(1), 0); // num_qo_heads should be divisible by num_kv_heads
+	CHECK_EQ(v.size(1), num_kv_heads);
+	CHECK_EQ(q.size(2), head_dim);
+	CHECK_EQ(o.size(1), num_qo_heads);
+	CHECK_EQ(o.size(2), head_dim / 8);
+
+	size_t page_size;
+	QKVLayout kv_layout = static_cast<QKVLayout>(layout);
+	if(kv_layout == QKVLayout::kHND) {
+		page_size = kv_data.size(3);
+		CHECK_EQ(kv_data.size(2), num_kv_heads);
+		CHECK_EQ(kv_data.size(4), head_dim);
+		CHECK_EQ(hadamard_data.size(2), num_kv_heads);
+		CHECK_EQ(hadamard_data.size(4), head_dim / 8);
+	} else {
+		page_size = kv_data.size(2);
+		CHECK_EQ(kv_data.size(3), num_kv_heads);
+		CHECK_EQ(kv_data.size(4), head_dim);
+		CHECK_EQ(hadamard_data.size(3), num_kv_heads);
+		CHECK_EQ(hadamard_data.size(4), head_dim / 8);
+	}
+
+	bool success = DISPATCH_PYTORCH_DTYPE_TO_CTYPE(k.scalar_type(), c_type, [&] {
+		SWITCH_LAYOUT(kv_layout, KV_LAYOUT, {
+			paged_kv_t<PageStorage::kIndices, KV_LAYOUT, c_type, int32_t> paged_kv(
+				num_kv_heads,
+				page_size,
+				head_dim,
+				batch_size,
+				0,
+				kv_last_page_len,
+				kv_last_page_idx,
+				static_cast<c_type*>(kv_data.data_ptr()),
+				static_cast<int32_t*>(kv_indices.data_ptr()),
+				static_cast<int32_t*>(kv_indptr.data_ptr()));
+
+			paged_kv_t<PageStorage::kIndices, KV_LAYOUT, c_type, int32_t> paged_hadamard(
+				num_kv_heads,
+				page_size,
+				head_dim/8,
+				batch_size,
+				0,
+				hadamard_last_page_len,
+				hadamard_last_page_idx,
+				static_cast<c_type*>(hadamard_data.data_ptr()),
+				static_cast<int32_t*>(hadamard_indices.data_ptr()),
+				static_cast<int32_t*>(hadamard_indptr.data_ptr()));
+
+			cudaError_t status =
+				AppendPagedKVCacheDecodeFused<PageStorage::kIndices, KV_LAYOUT, c_type, int32_t>(
+					paged_kv,
+					paged_hadamard,
+					static_cast<c_type*>(q.data_ptr()),
+					static_cast<c_type*>(k.data_ptr()),
+					static_cast<c_type*>(v.data_ptr()),
+					static_cast<c_type*>(o.data_ptr()),
+					num_qo_heads,
+					nullptr);
+
+			TORCH_CHECK(status == cudaSuccess,
+						"Append_kv_cache_decode_fused failed with error code ",
+						cudaGetErrorString(status));
+		});
+		return true;
+	});
+
+	TORCH_CHECK(success, "Append_kv_cache_decode_fused failed to dispatch with dtype ", k.scalar_type());
+}
+
 void append_kv_cache_prefill(torch::Tensor k,
 							 torch::Tensor v,
 							 torch::Tensor h_k,

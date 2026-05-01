@@ -14,6 +14,7 @@ __all__ = [
     'InferenceController',
     "BatchDecodeWithPagedKVCacheWrapper",
     "append_kv",
+    "append_kvh_decode_fused",
     "prefill_forward",
     "decode_estimate",
     "decode_topk",
@@ -112,8 +113,8 @@ def append_kvh(
     `MAXLEN`: maximum length of the KV cache
 
     Args:
-        k: Shape: `[N, Hkv, D]`. Key projection (`X @ W_k`).
-        v: Shape: `[N, Hkv, D]`. Value projection (`X @ W_v`).
+        k: Shape: `[N, H_{kv}, D]`. Key projection (`X @ W_k`).
+        v: Shape: `[N, H_{kv}, D]`. Value projection (`X @ W_v`).
         h_q: Shape: `[N, H_q, D]`. Hadamard projection of Query (`hadamard_transform(q)`). 
         h_k: Sahpe: `[N, H_{kv}, D]`. Hadamard projection of Key (`hadamard_transform(k)`).
         iController: InferenceController object, which contains all needed information.
@@ -158,6 +159,52 @@ def append_kvh(
             iController.layout
         )
         return o    
+    
+def append_kvh_decode_fused(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    iController: InferenceController,
+    layer_idx: int,
+):
+    """
+    Semantics of `append_kvh_decode_fused`:
+    Append new generated k/v/h_k into kvh cache, return 2-bit query code.
+
+    Notations for shapes:
+    `N`: sequence length
+    `H_q`: number of query heads
+    `H_{kv}`: number of key/value heads
+    `D`: head dimension
+    `MAXLEN`: maximum length of the KV cache
+
+    Args:
+        q: Shape: `[N, H_q, D]`. Key projection (`X @ W_k`).
+        k: Shape: `[N, H_{kv}, D]`. Key projection (`X @ W_k`).
+        v: Shape: `[N, H_{kv}, D]`. Value projection (`X @ W_v`).
+        iController: InferenceController object, which contains all needed information.
+        layer_idx: Layer index of the KV cache.
+    """
+    seq_len, num_kv_heads, head_dim = k.shape
+    o = torch.empty(seq_len, iController.num_qo_heads, head_dim // 8, dtype=q.dtype, device=q.device)
+    _kernels.append_kv_cache_decode_fused(
+        q,
+        k,
+        v,
+        o,
+        iController.kv_cache.buf_layer(layer_idx),
+        iController.kv_indices_with_last,
+        iController.kv_indptr_for_append,
+        iController.kv_cache.last_page_len,
+        iController.kv_last_page_idx,
+        iController.hadamard_cache.buf_layer(layer_idx),
+        iController.hadamard_indices,
+        iController.hadamard_indptr_for_append,
+        iController.hadamard_cache.last_page_len,
+        iController.hadamard_last_page_idx,
+        iController.layout
+    )
+    return o    
 
 def prefill_forward(
     q: torch.Tensor,
@@ -194,7 +241,10 @@ def prefill_forward(
         q,
         iController.kv_cache.buf_layer(layer_idx),
         iController.kv_indices_with_last,
+        iController.prefill_q_indptr,
+        iController.kv_indptr_for_append,
         iController.kv_cache.last_page_len,
+        iController.kv_last_page_idx,
         True, # Casual
         iController.layout,
         False, # FP16 Accumulator for 4090

@@ -53,6 +53,8 @@ def benchmark_Adamas():
     parser.add_argument("--page_size", type=int, default=16)
     parser.add_argument("--token_budget", type=int, default=256)
     parser.add_argument("--iteration", type=int, default=1)
+    parser.add_argument("--record_shapes", action="store_true")
+    parser.add_argument("--with_stack", action="store_true")
     args = parser.parse_args()
 
     assert args.model in MODEL_CFGS, f"Model {args.model} not found in MODEL_CFGS"
@@ -84,18 +86,23 @@ def benchmark_Adamas():
         # clear cuda cache
         torch.cuda.empty_cache()
 
-        # Prefill Stage
-        ts = time.perf_counter()
-        hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
-        model(
-            inputs_embeds=hidden_states,
-        )
-        te = time.perf_counter()
-        prefill_latency.append(te - ts)
 
         # Start decoding decode_len tokens
         with profile(activities=[
-            ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True, with_stack=True) as prof:
+            ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            record_shapes=args.record_shapes,
+            with_stack=args.with_stack) as prof:
+
+            with record_function("model_prefill"):
+                # Prefill Stage
+                ts = time.perf_counter()
+                hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
+                model(
+                    inputs_embeds=hidden_states,
+                )
+                te = time.perf_counter()
+                prefill_latency.append(te - ts)
+                
             with record_function("model_inference"):
                 for _ in range(decode_len):
                     ts = time.perf_counter()

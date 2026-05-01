@@ -66,6 +66,23 @@ class InferenceController:
         self.topk_dout_buffer = None
         self.topk_dindices_buffer = None
         self.topk_buf = None
+
+        self._kv_indices_all = torch.arange(
+            self.kv_cache.pool.capacity, dtype=torch.int32, device=self.device
+        )
+        self._hadamard_indices_all = torch.arange(
+            self.hadamard_cache.pool.capacity, dtype=torch.int32, device=self.device
+        )
+
+        self.kv_indptr_for_append = torch.empty(2, dtype=torch.int32, device=self.device)
+        self.hadamard_indptr_for_append = torch.empty(2, dtype=torch.int32, device=self.device)
+        self.kv_indptr_for_approx_decode = torch.empty(2, dtype=torch.int32, device=self.device)
+        self.prefill_q_indptr = torch.empty(2, dtype=torch.int32, device=self.device)
+
+        self.kv_indptr_for_append[0] = 0
+        self.hadamard_indptr_for_append[0] = 0
+        self.kv_indptr_for_approx_decode[0] = 0
+        self.prefill_q_indptr[0] = 0
     
     # Used for controlling the number of pages
     # Here we skip first two layers by manipulating this.
@@ -86,8 +103,8 @@ class InferenceController:
         # Allocate tensor in advance
         # This is used for append kernels, which need original indices
         if updateTensor:
-            self.kv_indptr_for_append = torch.tensor([0, len(self.kv_cache.indicies)], dtype=torch.int32, device=self.device)
-            self.hadamard_indptr_for_append = torch.tensor([0, len(self.hadamard_cache.indicies)], dtype=torch.int32, device=self.device)
+            self.kv_indptr_for_append[1] = len(self.kv_cache.indicies)
+            self.hadamard_indptr_for_append[1] = len(self.hadamard_cache.indicies)
             self.kv_last_page_idx = self.kv_cache.indicies[-1]
             self.hadamard_last_page_idx = self.hadamard_cache.indicies[-1]
 
@@ -95,8 +112,9 @@ class InferenceController:
             # prefill requests
             # append_kv_cache_prefill and prefill_with_paged_kv_cache
             if updateTensor:
-                self.kv_indices_with_last = torch.tensor(self.kv_cache.indicies, dtype=torch.int32, device=self.device)
-                self.hadamard_indices = torch.tensor(self.hadamard_cache.indicies, dtype=torch.int32, device=self.device)
+                self.prefill_q_indptr[1] = seq_len
+                self.kv_indices_with_last = self._kv_indices_all[:len(self.kv_cache.indicies)]
+                self.hadamard_indices = self._hadamard_indices_all[:len(self.hadamard_cache.indicies)]
         else:
             # decode requests
             # append_kv_cache_decode, estimate_attn_score, topk_filtering
@@ -105,19 +123,19 @@ class InferenceController:
 
             if updateTensor:
                 # used for appending
-                self.kv_indices_with_last = torch.tensor(self.kv_cache.indicies, dtype=torch.int32, device=self.device)
+                self.kv_indices_with_last = self._kv_indices_all[:len(self.kv_cache.indicies)]
 
                 # Only used for top-k filtering (because we manully exclude the last page) as input index
-                self.kv_indices_without_last = torch.tensor(self.kv_cache.indicies[:-1], dtype=torch.int32, device=self.device).repeat(self.num_qo_heads, 1)
+                self.kv_indices_without_last = self._kv_indices_all[:cur_page_nums - 1].repeat(self.num_qo_heads, 1)
 
                 # used for estimate
-                self.hadamard_indices = torch.tensor(self.hadamard_cache.indicies, dtype=torch.int32, device=self.device)
+                self.hadamard_indices = self._hadamard_indices_all[:len(self.hadamard_cache.indicies)]
 
             # used as page_budget for topk and approx kernel
             self.inference_page_budget = min(self._page_budget, cur_page_nums)
 
             # Exclude the last page for decoding
-            self.kv_indptr_for_approx_decode = torch.tensor([0, self.inference_page_budget - 1], dtype=torch.int32, device=self.device)
+            self.kv_indptr_for_approx_decode[1] = self.inference_page_budget - 1
 
             # Allocate buffer for top-k filtering
             self.topk_dout_buffer = torch.zeros((self.num_qo_heads, self.inference_page_budget - 1), dtype=self.dtype, device=self.device)

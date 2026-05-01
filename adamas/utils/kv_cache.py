@@ -23,8 +23,10 @@ class KvPool:
         dtype=dtype,
         device=device)
     
-    # 32 layers are identical
-    self._free = set(range(capacity))
+    # This cache is used by a single active sequence. Allocate page ids
+    # monotonically so Python does not need to manage a large free set during
+    # prefill.
+    self._next_block = 0
 
   @property
   def layout(self):
@@ -46,7 +48,7 @@ class KvPool:
 
   @property
   def num_free_blocks(self):
-    return len(self._free)
+    return self.capacity - self._next_block
 
   @property
   def capacity(self):
@@ -54,13 +56,26 @@ class KvPool:
     return c
 
   def alloc_block(self) -> int:
-    idx = self._free.pop()
+    if self._next_block >= self.capacity:
+      raise RuntimeError("KV cache capacity exceeded")
+    idx = self._next_block
+    self._next_block += 1
     return idx
+
+  def alloc_blocks(self, num_blocks: int) -> list[int]:
+    if num_blocks <= 0:
+      return []
+    if self._next_block + num_blocks > self.capacity:
+      raise RuntimeError("KV cache capacity exceeded")
+    start = self._next_block
+    self._next_block += num_blocks
+    return list(range(start, start + num_blocks))
 
   def free_block(self, idx: int):
     assert 0 <= idx < self.capacity
-    assert idx not in self._free
-    self._free.add(idx)
+
+  def reset(self):
+    self._next_block = 0
 
 
 class KvCache:
@@ -119,18 +134,16 @@ class KvCache:
     """Reserve space for tokens and return number of new pages"""
     if seq_len <= 0:
         return 0
-    appended_page_count = 0
-    for _ in range(seq_len):
-        last_page_offset = self.last_page_len
-        if last_page_offset == self._pool.block_len:
-            self._indicies.append(self._pool.alloc_block())
-            appended_page_count += 1
-        self._seqlen += 1
+    old_num_pages = (self._seqlen + self._pool.block_len - 1) // self._pool.block_len
+    new_seqlen = self._seqlen + seq_len
+    new_num_pages = (new_seqlen + self._pool.block_len - 1) // self._pool.block_len
+    appended_page_count = new_num_pages - old_num_pages
+    self._indicies.extend(self._pool.alloc_blocks(appended_page_count))
+    self._seqlen = new_seqlen
     return appended_page_count
 
   def release(self):
     """Release all blocks"""
     self._seqlen = 0
-    for idx in self._indicies:
-      self._pool.free_block(idx)
     self._indicies.clear()
+    self._pool.reset()

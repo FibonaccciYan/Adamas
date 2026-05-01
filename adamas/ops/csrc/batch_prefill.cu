@@ -29,7 +29,10 @@ using namespace flashinfer;
 torch::Tensor prefill_with_paged_kv_cache(torch::Tensor q,
 										  torch::Tensor kv_data,
 										  torch::Tensor kv_indices,
+										  torch::Tensor q_indptr,
+										  torch::Tensor kv_indptr,
 										  unsigned int kv_last_page_len,
+										  unsigned int kv_last_page_idx,
 										  bool causal,
 										  unsigned int layout,
 										  bool allow_fp16_qk_reduction,
@@ -43,11 +46,9 @@ torch::Tensor prefill_with_paged_kv_cache(torch::Tensor q,
 	// [max_num_pages, 2, page_size, num_kv_heads, head_dim] for HND
 	CHECK_INPUT(kv_data);
 	CHECK_INPUT(kv_indices); // [sum(seq_len)]
+	CHECK_INPUT(q_indptr);
+	CHECK_INPUT(kv_indptr);
 	#endif
-
-	// bsk only utilizes flashinfer for bsz=1. Therefore we can infer some parameters.
-	torch::Tensor q_indptr = torch::tensor({0, static_cast<int32_t>(q.size(0))}, kv_indices.options());
-	torch::Tensor kv_indptr = torch::tensor({0, static_cast<int32_t>(kv_indices.size(0))}, kv_indices.options());
 
 	#ifdef BSK_TORCH_CHECK
 	CHECK_DIM(3, q);
@@ -57,6 +58,8 @@ torch::Tensor prefill_with_paged_kv_cache(torch::Tensor q,
 	CHECK_DIM(1, kv_indices);
 	CHECK_EQ(q_indptr.size(0), kv_indptr.size(0));
 	CHECK_EQ(kv_indices.scalar_type(), torch::kInt32);
+	CHECK_EQ(q_indptr.scalar_type(), torch::kInt32);
+	CHECK_EQ(kv_indptr.scalar_type(), torch::kInt32);
 	CHECK_EQ(q.size(2), kv_data.size(4));
 	#endif
 
@@ -83,7 +86,7 @@ torch::Tensor prefill_with_paged_kv_cache(torch::Tensor q,
 				batch_size,
 				0,
 				kv_last_page_len,
-				kv_indices[-1].item<int32_t>(),
+				kv_last_page_idx,
 				static_cast<c_type*>(kv_data.data_ptr()),
 				static_cast<int32_t*>(kv_indices.data_ptr()),
 				static_cast<int32_t*>(kv_indptr.data_ptr()));

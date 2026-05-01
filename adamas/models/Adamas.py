@@ -1,4 +1,5 @@
 import math
+import os
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -151,26 +152,33 @@ class Adamas(nn.Module):
             )
             torch.cuda.nvtx.range_pop()
         else:
-            torch.cuda.nvtx.range_push("hadamard_transform")
-            # hadamard_states = torch.cat(
-            #     (query_states, key_states), 
-            #     dim=0,
-            # )
-            hadamard_query_states = faster_hadamard_transform.hadamard_transform(query_states, inplace=False)
-            hadamard_key_states = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
-
-            # faster_hadamard_transform.hadamard_transform(hadamard_states, inplace=True)
-            torch.cuda.nvtx.range_pop()
-
             # We concat after RoPE
             torch.cuda.nvtx.range_push("append_kvh")
-            query_code_2bit = adamas.utils.append_kvh(
+            # fused_append_limit = int(os.environ.get("ADAMAS_FUSED_APPEND_MAX_HADAMARD_SEQLEN", "20000"))
+            # use_fused_append = (
+            #     os.environ.get("ADAMAS_DISABLE_FUSED_APPEND", "0") != "1"
+            #     and iController.hadamard_cache.seqlen <= fused_append_limit
+            # )
+            # if not use_fused_append:
+            #     torch.cuda.nvtx.range_push("hadamard_transform")
+            #     hadamard_query_states = faster_hadamard_transform.hadamard_transform(query_states, inplace=False)
+            #     hadamard_key_states = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
+            #     torch.cuda.nvtx.range_pop()
+            #     query_code_2bit = adamas.utils.append_kvh(
+            #         key_states,
+            #         value_states,
+            #         hadamard_key_states,
+            #         iController,
+            #         self.layer_idx,
+            #         hadamard_query_states,
+            #     )
+            # else:
+            query_code_2bit = adamas.utils.append_kvh_decode_fused(
+                query_states,
                 key_states,
                 value_states,
-                hadamard_key_states,
                 iController,
                 self.layer_idx,
-                hadamard_query_states,
             )
             torch.cuda.nvtx.range_pop()
 

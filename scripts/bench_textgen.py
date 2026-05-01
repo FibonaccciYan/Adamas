@@ -3,6 +3,7 @@
 
 import argparse
 import dataclasses
+from pathlib import Path
 import time
 import numpy as np
 import torch
@@ -111,7 +112,8 @@ def benchmark_Adamas():
     print("page_size,token_budget,context_len,decode_len,avg_prefill_latency,avg_decode_latency")
     print(f"{page_size},{token_budget},{context_len},{decode_len},{avg_prefill_latency},{avg_decode_latency}")
 
-    output_file = f"../test_results/{args.model}/e2e_Adamas.txt"
+    output_file = Path(__file__).resolve().parents[1] / "test_results" / args.model / "e2e_Adamas.txt"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, "a") as f:
         f.write(f"{page_size},{token_budget},{context_len},{decode_len},{avg_prefill_latency},{avg_decode_latency}\n")
 
