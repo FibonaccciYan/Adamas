@@ -19,6 +19,10 @@ from transformers.modeling_flash_attention_utils import _flash_attention_forward
 
 import faster_hadamard_transform
 
+from transformers.processing_utils import Unpack
+from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
+from transformers.models.qwen3.modeling_qwen3 import eager_attention_forward, ALL_ATTENTION_FUNCTIONS
+
 @torch.jit.script
 def repeat_kv_yarn(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """
@@ -377,8 +381,94 @@ def yarn_forward(
     return attn_output, attn_weights, past_key_value
 
 
-global layer_id
-layer_id = 32
+def qwen3_adamas_forward_4_51_0(
+    self,
+    hidden_states: torch.Tensor,
+    position_embeddings: Tuple[torch.Tensor, torch.Tensor],
+    attention_mask: Optional[torch.Tensor],
+    past_key_value: Optional[Cache] = None,
+    cache_position: Optional[torch.LongTensor] = None,
+    **kwargs: Unpack[FlashAttentionKwargs],
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+    input_shape = hidden_states.shape[:-1]
+    hidden_shape = (*input_shape, -1, self.head_dim)
+
+    query_states = self.q_norm(self.q_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
+    key_states = self.k_norm(self.k_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
+    value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+
+    cos, sin = position_embeddings
+    query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+    ### Hadamard Transform key states for Adamas
+    hadamard_states = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
+    ###
+
+    if past_key_value is not None:
+        # sin and cos are specific to RoPE models; cache_position needed for the static cache
+        cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+        key_states, value_states, hadamard_states = past_key_value.update(key_states, value_states, hadamard_states, self.layer_idx, cache_kwargs)
+
+
+    if input_shape[1] > 1 or self.layer_idx < 2:
+        attention_interface: Callable = eager_attention_forward
+        if self.config._attn_implementation != "eager":
+            if self.config._attn_implementation == "sdpa" and kwargs.get("output_attentions", False):
+                logger.warning_once(
+                    "`torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to "
+                    'eager attention. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
+                )
+            else:
+                attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
+
+        attn_output, attn_weights = attention_interface(
+            self,
+            query_states,
+            key_states,
+            value_states,
+            attention_mask,
+            dropout=0.0 if not self.training else self.attention_dropout,
+            scaling=self.scaling,
+            sliding_window=self.sliding_window,  # diff with Llama
+            **kwargs,
+        )
+
+    else:
+        ################### CORE ADAMAS LOGIC ###################
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
+        hadamard_states = repeat_kv(hadamard_states, self.num_key_value_groups)
+
+        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scaling
+
+        thresholds = torch.tensor([-10, 0, 10], device=query_states.device)
+        key_code   = torch.bucketize(hadamard_states, thresholds, out_int32=True)
+        query_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(query_states, inplace=False), thresholds, out_int32=True)
+        
+        distances = nn.functional.pairwise_distance(query_code, key_code, p=1).unsqueeze(2)  # [bsz, nh, q_len, kv_seq_len]
+
+        token_budget = min(self.token_budget, key_code.shape[-2])
+        _, topk_indices = distances.topk(k=token_budget, dim=-1, largest=False)
+
+        mask_bottom = torch.zeros_like(attn_weights, dtype=torch.bool)
+        mask_bottom.scatter_(-1, topk_indices, True)
+
+        attn_weights = attn_weights.masked_fill(~mask_bottom, torch.tensor(torch.finfo(attn_weights.dtype).min))
+        
+        if attention_mask is not None:  # no matter the length, we just slice it
+            causal_mask = attention_mask[:, :, :, : key_code.shape[-2]]
+            attn_weights = attn_weights + causal_mask
+        
+        # upcast attention to fp32
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        attn_output = torch.matmul(attn_weights, value_states)
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        #########################################################
+
+    attn_output = attn_output.reshape(*input_shape, -1).contiguous()
+    attn_output = self.o_proj(attn_output)
+    return attn_output, attn_weights
+
 
 def enable_adamas_attention_eval(model, args):
     for name, module in reversed(model._modules.items()):
@@ -388,13 +478,10 @@ def enable_adamas_attention_eval(model, args):
                 args,
             )
 
-        global layer_id
         if name == "self_attn":
-            layer_id -= 1
-            model._modules[name].layer_id = layer_id
             model._modules[name].flash_forward = model._modules[name].forward
             model._modules[name].forward = types.MethodType(
-                adamas_forward, model._modules[name]
+                qwen3_adamas_forward_4_51_0, model._modules[name]
             )
 
             model._modules[name].token_budget = args.token_budget

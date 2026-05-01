@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-GPU=${GPU:-4}
+GPU=${GPU:-0}
 MODEL_NAME=${MODEL_NAME:-llama3.1-8b-instruct}
 BENCHMARK=${BENCHMARK:-synthetic}
 PYTHONPATH_ROOT=${PYTHONPATH_ROOT:-/data0/ysy/Adamas}
