@@ -8,6 +8,6 @@
     "chatglm3-6b-32k": "THUDM/chatglm3-6b-32k",
     "vicuna-v1.5-7b-16k": "lmsys/vicuna-7b-v1.5-16k", 
     "Mistral-7B-Instruct-v0.3": "mistralai/Mistral-7B-Instruct-v0.3", 
-    "Meta-Llama-3.1-8B-Instruct": "meta-llama/Llama-3.1-8B-Instruct",
+    "Meta-Llama-3.1-8B-Instruct": "/data1/model/llama3/meta-llama/Llama-3.1-8B-Instruct",
     "Qwen3-8b": "/data1/model/qwen/Qwen/Qwen3-8B"
 }

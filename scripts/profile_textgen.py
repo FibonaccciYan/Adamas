@@ -95,8 +95,8 @@ def benchmark_Adamas():
 
             with record_function("model_prefill"):
                 # Prefill Stage
-                ts = time.perf_counter()
                 hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
+                ts = time.perf_counter()
                 model(
                     inputs_embeds=hidden_states,
                 )
@@ -105,8 +105,8 @@ def benchmark_Adamas():
                 
             with record_function("model_inference"):
                 for _ in range(decode_len):
-                    ts = time.perf_counter()
                     hidden_states = torch.randn(1, 1, hidden_size, dtype=dtype, device=device)
+                    ts = time.perf_counter()
                     model(
                         inputs_embeds=hidden_states,
                     )

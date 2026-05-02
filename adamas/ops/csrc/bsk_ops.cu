@@ -7,6 +7,9 @@ PYBIND11_MODULE(_kernels, m) {
 	m.def("rms_norm_forward", &rms_norm_forward, "rms_norm_forward by cutlass");
 	m.def("topk_filtering", &topk_filtering, "Top-k filtering operator");
 	m.def("estimate_attn_score", &estimate_attn_score, "Estimate Attention Score operator");
+	m.def("estimate_topk_filtering",
+		  &estimate_topk_filtering,
+		  "Fused estimate attention score and top-k filtering operator");
 	m.def("append_kv_cache_prefill", &append_kv_cache_prefill, "Append KV-Cache Prefill operator");
 	m.def("append_kv_cache_decode", &append_kv_cache_decode, "Append KV-Cache Decode operator");
 	m.def("append_kv_cache_decode_fused",

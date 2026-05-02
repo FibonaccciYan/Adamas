@@ -17,6 +17,7 @@ __all__ = [
     "append_kvh_decode_fused",
     "prefill_forward",
     "decode_estimate",
+    "decode_estimate_topk",
     "decode_topk",
     "decode_sparse_attn",
     "rms_norm_forward",
@@ -319,6 +320,35 @@ def decode_topk(
         iController.topk_dindices_buffer,
         iController.topk_buf,
         page_budet,
+    )
+
+def decode_estimate_topk(
+    q: torch.Tensor,
+    iController: InferenceController,
+    layer_idx: int,
+):
+    """
+    Estimate sparse attention scores and select top-k pages without materializing
+    the full `[num_qo_heads, seqlen]` score matrix in Python.
+    """
+    page_budget = iController.inference_page_budget - 1
+    f = _kernels.estimate_topk_filtering
+    f(
+        q,
+        iController.group_topk_dout_buffer,
+        iController.group_topk_dindices_buffer,
+        iController.topk_dout_buffer,
+        iController.topk_dindices_buffer,
+        iController.estimate_topk_candidate_values,
+        iController.estimate_topk_candidate_indices,
+        iController.topk_buf,
+        iController.hadamard_cache.buf_layer(layer_idx),
+        iController.hadamard_indices,
+        iController.hadamard_indptr_for_append,
+        iController.hadamard_cache.last_page_len,
+        iController.hadamard_last_page_idx,
+        iController.layout,
+        page_budget,
     )
 
 def decode_sparse_attn(

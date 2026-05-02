@@ -435,20 +435,30 @@ def qwen3_adamas_forward_4_51_0(
 
     else:
         ################### CORE ADAMAS LOGIC ###################
+
+        thresholds_q = torch.tensor([-1.35, 0, 1.35], device=query_states.device)
+        thresholds_k = torch.tensor([-2.26, 0, 2.26], device=key_states.device)
+        query_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(query_states, inplace=False), thresholds_q, out_int32=True)
+        key_code   = torch.bucketize(hadamard_states, thresholds_k, out_int32=True)
+
+        token_budget = min(self.token_budget, key_code.shape[-2])
+        if self.num_key_value_groups > 1:
+            query_code_grouped = query_code.view(
+                input_shape[0], -1, self.num_key_value_groups, input_shape[1], self.head_dim
+            )
+            distances = (query_code_grouped[:, :, :, :, None, :] - key_code[:, :, None, None, :, :]).abs().sum(dim=-1)
+            group_distances = distances.min(dim=2).values
+            _, group_topk_indices = group_distances.topk(k=token_budget, dim=-1, largest=False)
+            topk_indices = group_topk_indices.repeat_interleave(self.num_key_value_groups, dim=1)
+        else:
+            distances = (query_code[:, :, :, None, :] - key_code[:, :, None, :, :]).abs().sum(dim=-1)
+            _, topk_indices = distances.topk(k=token_budget, dim=-1, largest=False)
+
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
         hadamard_states = repeat_kv(hadamard_states, self.num_key_value_groups)
 
         attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scaling
-
-        thresholds = torch.tensor([-10, 0, 10], device=query_states.device)
-        key_code   = torch.bucketize(hadamard_states, thresholds, out_int32=True)
-        query_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(query_states, inplace=False), thresholds, out_int32=True)
-        
-        distances = nn.functional.pairwise_distance(query_code, key_code, p=1).unsqueeze(2)  # [bsz, nh, q_len, kv_seq_len]
-
-        token_budget = min(self.token_budget, key_code.shape[-2])
-        _, topk_indices = distances.topk(k=token_budget, dim=-1, largest=False)
 
         mask_bottom = torch.zeros_like(attn_weights, dtype=torch.bool)
         mask_bottom.scatter_(-1, topk_indices, True)

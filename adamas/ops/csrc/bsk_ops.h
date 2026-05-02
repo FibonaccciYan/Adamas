@@ -49,6 +49,22 @@ void estimate_attn_score(torch::Tensor q,
 						 unsigned int metadata_last_page_idx,
 						 unsigned int layout);
 
+void estimate_topk_filtering(torch::Tensor q,
+							 torch::Tensor group_topk_values,
+							 torch::Tensor group_topk_indices,
+							 torch::Tensor topk_values,
+							 torch::Tensor topk_indices,
+							 torch::Tensor candidate_values,
+							 torch::Tensor candidate_indices,
+							 torch::Tensor topk_buf,
+							 torch::Tensor hadamard_data,
+							 torch::Tensor hadamard_indices,
+							 torch::Tensor hadamard_indptr,
+							 unsigned int hadamard_last_page_len,
+							 unsigned int hadamard_last_page_idx,
+							 unsigned int layout,
+							 unsigned int page_budget);
+
 void append_kv_cache_prefill(torch::Tensor k,
 							 torch::Tensor v,
 							 torch::Tensor h,

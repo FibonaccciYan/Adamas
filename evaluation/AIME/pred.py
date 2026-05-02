@@ -125,42 +125,52 @@ def generate_one(model, tokenizer, problem, max_new_tokens, model_name, enable_t
 
     if "qwen3" in model_name.lower():
         past_key_values = AdamasDynamicCache()
-    else:
-        past_key_values = None
 
-    with torch.no_grad():
-        output = model(
-            input_ids=inputs.input_ids,
+        generated_ids = model.generate(
+            **inputs,
             past_key_values=past_key_values,
-            use_cache=True,
+            max_new_tokens=max_new_tokens,
         )
-        past_key_values = output.past_key_values
-        pred_token_idx = output.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
-        generated_content = [pred_token_idx.item()]
+        output_ids = generated_ids[0][len(inputs.input_ids[0]):].tolist() 
 
-        for _ in range(max_new_tokens - 1):
-            outputs = model(
-                input_ids=pred_token_idx,
-                past_key_values=past_key_values,
-                use_cache=True,
-            )
-            past_key_values = outputs.past_key_values
-            pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
-            generated_content.append(pred_token_idx.item())
-            if pred_token_idx.item() == tokenizer.eos_token_id:
-                break
-
-    if "qwen3" in model_name.lower() and enable_thinking:
         # parsing thinking content
         try:
             # rindex finding 151668 (</think>)
-            index = len(generated_content) - generated_content[::-1].index(151668)
+            index = len(output_ids) - output_ids[::-1].index(151668)
         except ValueError:
             index = 0
-        generated_content = generated_content[index:]
 
-    generated_ids = torch.tensor(generated_content, device=inputs.input_ids.device)
-    return tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        thinking_content = tokenizer.decode(output_ids[:index], skip_special_tokens=True).strip("\n")
+        content = tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
+
+        return content
+    else:
+        past_key_values = None
+
+        with torch.no_grad():
+            output = model(
+                input_ids=inputs.input_ids,
+                past_key_values=past_key_values,
+                use_cache=True,
+            )
+            past_key_values = output.past_key_values
+            pred_token_idx = output.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+            generated_content = [pred_token_idx.item()]
+
+            for _ in range(max_new_tokens - 1):
+                outputs = model(
+                    input_ids=pred_token_idx,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                )
+                past_key_values = outputs.past_key_values
+                pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+                generated_content.append(pred_token_idx.item())
+                if pred_token_idx.item() == tokenizer.eos_token_id:
+                    break
+
+        generated_ids = torch.tensor(generated_content, device=inputs.input_ids.device)
+        return tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
 
 def evaluate(model, tokenizer, dataset, args):

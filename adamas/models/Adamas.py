@@ -193,19 +193,11 @@ class Adamas(nn.Module):
                 )
                 torch.cuda.nvtx.range_pop()
             else:
-                torch.cuda.nvtx.range_push("estimate")
-                estimated_attn_score = adamas.utils.decode_estimate(
+                torch.cuda.nvtx.range_push("group_min_estimate_topk")
+                adamas.utils.decode_estimate_topk(
                     query_code_2bit,
                     iController,
                     self.layer_idx,
-                )
-                torch.cuda.nvtx.range_pop()
-
-                # select top-k smallest indices
-                torch.cuda.nvtx.range_push("topk")
-                adamas.utils.decode_topk(
-                    estimated_attn_score,
-                    iController,
                 )
                 torch.cuda.nvtx.range_pop()
 

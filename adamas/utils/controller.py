@@ -65,7 +65,14 @@ class InferenceController:
 
         self.topk_dout_buffer = None
         self.topk_dindices_buffer = None
+        self.group_topk_dout_buffer = None
+        self.group_topk_dindices_buffer = None
         self.topk_buf = None
+        self.estimate_topk_candidate_values = None
+        self.estimate_topk_candidate_indices = None
+        self.estimate_topk_num_chunks = 0
+        self.estimate_topk_local_k = 0
+        self.estimate_topk_chunk_size = 1024
 
         self._kv_indices_all = torch.arange(
             self.kv_cache.pool.capacity, dtype=torch.int32, device=self.device
@@ -78,6 +85,7 @@ class InferenceController:
         self.hadamard_indptr_for_append = torch.empty(2, dtype=torch.int32, device=self.device)
         self.kv_indptr_for_approx_decode = torch.empty(2, dtype=torch.int32, device=self.device)
         self.prefill_q_indptr = torch.empty(2, dtype=torch.int32, device=self.device)
+        self.empty_indices = torch.empty(0, dtype=torch.int32, device=self.device)
 
         self.kv_indptr_for_append[0] = 0
         self.hadamard_indptr_for_append[0] = 0
@@ -125,8 +133,10 @@ class InferenceController:
                 # used for appending
                 self.kv_indices_with_last = self._kv_indices_all[:len(self.kv_cache.indicies)]
 
-                # Only used for top-k filtering (because we manully exclude the last page) as input index
-                self.kv_indices_without_last = self._kv_indices_all[:cur_page_nums - 1].repeat(self.num_qo_heads, 1)
+                if cur_page_nums <= min(self._page_budget, cur_page_nums):
+                    self.kv_indices_without_last = self._kv_indices_all[:cur_page_nums - 1].repeat(self.num_qo_heads, 1)
+                else:
+                    self.kv_indices_without_last = self.empty_indices
 
                 # used for estimate
                 self.hadamard_indices = self._hadamard_indices_all[:len(self.hadamard_cache.indicies)]
@@ -137,10 +147,17 @@ class InferenceController:
             # Exclude the last page for decoding
             self.kv_indptr_for_approx_decode[1] = self.inference_page_budget - 1
 
-            # Allocate buffer for top-k filtering
-            self.topk_dout_buffer = torch.zeros((self.num_qo_heads, self.inference_page_budget - 1), dtype=self.dtype, device=self.device)
-            self.topk_dindices_buffer = torch.zeros((self.num_qo_heads, self.inference_page_budget - 1), dtype=torch.int32, device=self.device)
-            self.topk_buf = torch.zeros((self.num_qo_heads, 8192 * 2 * (2+4) // 2 // 48), dtype=self.dtype, device=self.device)
+            if cur_page_nums > self.inference_page_budget:
+                # Allocate buffer for top-k filtering
+                page_budget = self.inference_page_budget - 1
+                estimate_len = self.hadamard_cache.seqlen - 1
+                self.topk_dout_buffer = torch.empty((self.num_qo_heads, page_budget), dtype=self.dtype, device=self.device)
+                self.topk_dindices_buffer = torch.empty((self.num_qo_heads, page_budget), dtype=torch.int32, device=self.device)
+                self.group_topk_dout_buffer = torch.empty((self.num_kv_heads, page_budget), dtype=self.dtype, device=self.device)
+                self.group_topk_dindices_buffer = torch.empty((self.num_kv_heads, page_budget), dtype=torch.int32, device=self.device)
+                self.estimate_topk_candidate_values = torch.empty((self.num_kv_heads, estimate_len), dtype=self.dtype, device=self.device)
+                self.estimate_topk_candidate_indices = torch.empty((self.num_kv_heads, estimate_len), dtype=torch.int32, device=self.device)
+                self.topk_buf = torch.empty((self.num_qo_heads, 8192 * 2 * (2+4) // 2 // 48), dtype=self.dtype, device=self.device)
 
             self._decode_handler.begin_forward(
                 self.kv_indptr_for_approx_decode,

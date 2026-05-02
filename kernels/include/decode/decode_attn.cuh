@@ -222,6 +222,60 @@ __device__ __forceinline__ void compute_manhatton_distances(const DTypeIn* smem_
 	}
 }
 
+template <uint32_t vec_size,
+		  uint32_t bdx,
+		  uint32_t bdy,
+		  uint32_t tile_size,
+		  typename DTypeIn,
+		  typename DTypeOut>
+__device__ __forceinline__ void compute_group_min_manhatton_distances(
+	const DTypeIn* smem_packed_h,
+	const vec_t<DTypeIn, vec_size>& q_vec,
+	uint32_t h_idx_base,
+	uint32_t iter_base,
+	uint32_t iter_bound,
+	DTypeOut* o,
+	uint16_t* group_min_smem) {
+	uint32_t tx = threadIdx.x, ty = threadIdx.y, tz = threadIdx.z;
+
+#pragma unroll
+	for(uint32_t j = 0; j < tile_size; ++j) {
+		vec_t<DTypeIn, vec_size> h_vec;
+		h_vec.cast_load(smem_packed_h + (j * bdx + tx) * vec_size);
+		uint16_t acc = 0;
+#pragma unroll
+		for(uint32_t i = 0; i < vec_size; ++i) {
+			const uint16_t packed_q = reinterpret_cast<const uint16_t&>(q_vec[i]);
+			const uint16_t packed_h = reinterpret_cast<const uint16_t&>(h_vec[i]);
+			uint16_t res = packed_q ^ packed_h;
+			acc += __popc(res & 0x5555) + (__popc(res & 0xAAAA) << 1);
+		}
+#pragma unroll
+		for(uint32_t offset = bdx / 2; offset > 0; offset /= 2) {
+			acc += __shfl_down_sync(0xffffffff, acc, offset);
+		}
+		if(iter_base + tz * tile_size + j < iter_bound && tx == 0) {
+			group_min_smem[((tz * tile_size + j) * bdy) + ty] = acc;
+		}
+	}
+	__syncthreads();
+
+	if(tx == 0 && ty == 0) {
+#pragma unroll
+		for(uint32_t j = 0; j < tile_size; ++j) {
+			if(iter_base + tz * tile_size + j < iter_bound) {
+				uint16_t min_acc = group_min_smem[(tz * tile_size + j) * bdy];
+#pragma unroll
+				for(uint32_t y = 1; y < bdy; ++y) {
+					min_acc = min(min_acc, group_min_smem[(tz * tile_size + j) * bdy + y]);
+				}
+				o[h_idx_base + tz * tile_size + j] = static_cast<DTypeOut>(min_acc);
+			}
+		}
+	}
+	__syncthreads();
+}
+
 /*!
  * \brief Load v tile from shared memory and update local state
  * \tparam vec_size A template integer indicates the vector size
@@ -451,6 +505,182 @@ __global__ void MaxPossibleSampleWithPagedKVCacheKernel(
 					tx * vec_size,
 				h_ptrs[j],
 				(((iter + num_stages_smem) * bdz + tz) * bdy + ty) * tile_size_per_bdx + j <
+					h_chunk_len);
+		}
+		cp_async::commit_group();
+		stage_idx = (stage_idx + 1) % num_stages_smem;
+	}
+	cp_async::wait_group<0>();
+}
+
+template <bool partition_kv,
+		  RotaryMode rotary_mode,
+		  uint32_t num_stages_smem,
+		  uint32_t tile_size_per_bdx,
+		  uint32_t CHUNK_SIZE,
+		  uint32_t vec_size,
+		  uint32_t bdx,
+		  uint32_t bdy,
+		  uint32_t bdz,
+		  PageStorage page_storage,
+		  QKVLayout kv_layout,
+		  typename DTypeIn,
+		  typename DTypeOut,
+		  typename IdType>
+__global__ void MaxPossibleSampleGroupMinWithPagedKVCacheKernel(
+	DTypeIn* __restrict__ q,
+	paged_kv_t<page_storage, kv_layout, DTypeIn, IdType> paged_hadamard,
+	DTypeOut* __restrict__ o,
+	uint32_t total_h_len
+) {
+	static_assert(partition_kv == false && rotary_mode == RotaryMode::kNone);
+	auto block = cg::this_thread_block();
+
+	constexpr uint32_t head_dim = bdx * vec_size;
+	const uint32_t batch_idx = 0;
+	const uint32_t chunk_idx = blockIdx.x;
+	const uint32_t h_head_idx = blockIdx.y;
+	const uint32_t qo_head_idx = h_head_idx * bdy + threadIdx.y;
+	const uint32_t num_qo_heads = gridDim.y * bdy;
+	const uint32_t cur_chunk_start = chunk_idx * CHUNK_SIZE;
+	if(cur_chunk_start >= total_h_len) {
+		return;
+	}
+	const uint32_t h_chunk_len = min(CHUNK_SIZE, total_h_len - cur_chunk_start);
+
+	const uint32_t cur_page_indptr_begin = paged_hadamard.indptr[batch_idx];
+
+	extern __shared__ uint8_t smem[];
+
+	DTypeIn* h_smem = (DTypeIn*)smem;
+	DTypeIn** h_ptrs_smem = (DTypeIn**)(smem + num_stages_smem * tile_size_per_bdx * bdy *
+													bdz * head_dim * sizeof(DTypeIn));
+	uint16_t* group_min_smem =
+		(uint16_t*)(smem + num_stages_smem * tile_size_per_bdx * bdy * bdz * head_dim *
+							 sizeof(DTypeIn) +
+					tile_size_per_bdx * bdy * bdz * bdx * sizeof(DTypeIn*));
+
+	const uint32_t tx = threadIdx.x, ty = threadIdx.y, tz = threadIdx.z;
+
+	vec_t<DTypeIn, vec_size> q_vec;
+	q_vec.cast_load(q + (batch_idx * num_qo_heads + qo_head_idx) * head_dim + tx * vec_size);
+	block.sync();
+
+	uint32_t stage_idx = 0;
+	constexpr uint32_t vec_bits = sizeof(DTypeIn) * vec_size * 8;
+	const IdType last_indptr = paged_hadamard.indptr[paged_hadamard.batch_size];
+
+	static_assert(num_stages_smem <= bdx);
+#pragma unroll
+	for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+		uint32_t local_linear = ((j * bdz + tz) * bdy + ty) * bdx + tx;
+		uint32_t global_linear = cur_chunk_start + local_linear;
+
+		uint32_t page_iter = cur_page_indptr_begin + global_linear / paged_hadamard.page_size;
+		uint32_t entry_idx = global_linear % paged_hadamard.page_size;
+
+		if(page_iter < last_indptr) {
+			h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] =
+				paged_hadamard.data +
+				((__ldg(paged_hadamard.indices + page_iter) * paged_hadamard.page_size +
+				  entry_idx) *
+					 paged_hadamard.num_heads +
+				 h_head_idx) *
+					paged_hadamard.head_dim;
+		} else {
+			h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] = paged_hadamard.data;
+		}
+	}
+	block.sync();
+
+	DTypeIn* h_ptrs[tile_size_per_bdx];
+#pragma unroll
+	for(uint32_t iter = 0; iter < num_stages_smem; ++iter) {
+#pragma unroll
+		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+			h_ptrs[j] =
+				h_ptrs_smem[((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j] +
+				tx * vec_size;
+		}
+#pragma unroll
+		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+			cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
+				h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) *
+							  head_dim +
+					tx * vec_size,
+				h_ptrs[j],
+				((iter * bdz + tz) * bdy + ty) * tile_size_per_bdx + j < h_chunk_len);
+		}
+		cp_async::commit_group();
+		stage_idx = (stage_idx + 1) % num_stages_smem;
+	}
+
+#pragma unroll 2
+	for(uint32_t iter = 0; iter < ceil_div(h_chunk_len, tile_size_per_bdx * bdy * bdz);
+		++iter) {
+		if((iter + num_stages_smem) % bdx == 0) {
+#pragma unroll
+			for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+				uint32_t local_linear =
+					(iter + num_stages_smem) * tile_size_per_bdx * bdy * bdz +
+					((j * bdz + tz) * bdy + ty) * bdx + tx;
+				uint32_t global_linear = cur_chunk_start + local_linear;
+
+				uint32_t page_iter =
+					cur_page_indptr_begin + global_linear / paged_hadamard.page_size;
+				uint32_t entry_idx = global_linear % paged_hadamard.page_size;
+
+				if(page_iter < last_indptr) {
+					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] =
+						paged_hadamard.data +
+						((__ldg(paged_hadamard.indices + page_iter) *
+							  paged_hadamard.page_size +
+						  entry_idx) *
+							 paged_hadamard.num_heads +
+						 h_head_idx) *
+							paged_hadamard.head_dim;
+				} else {
+					h_ptrs_smem[((j * bdz + tz) * bdy + ty) * bdx + tx] =
+						paged_hadamard.data;
+				}
+			}
+		}
+
+		cp_async::wait_group<num_stages_smem - 1>();
+		block.sync();
+		compute_group_min_manhatton_distances<vec_size,
+											  bdx,
+											  bdy,
+											  bdy * tile_size_per_bdx,
+											  DTypeIn,
+											  DTypeOut>(
+			h_smem + (stage_idx * bdz + tz) * bdy * tile_size_per_bdx * head_dim,
+			q_vec,
+			cur_chunk_start + iter * tile_size_per_bdx * bdy * bdz,
+			iter * tile_size_per_bdx * bdy * bdz,
+			h_chunk_len,
+			o + (h_head_idx * total_h_len),
+			group_min_smem);
+		block.sync();
+
+#pragma unroll
+		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+			h_ptrs[j] = h_ptrs_smem[((((iter + num_stages_smem) % bdx) * bdz + tz) *
+										 bdy +
+									 ty) *
+											tile_size_per_bdx +
+									j] +
+						tx * vec_size;
+		}
+#pragma unroll
+		for(uint32_t j = 0; j < tile_size_per_bdx; ++j) {
+			cp_async::pred_load<vec_bits, PrefetchMode::kPrefetch, SharedMemFillMode::kNoFill>(
+				h_smem + (((stage_idx * bdz + tz) * bdy + ty) * tile_size_per_bdx + j) *
+							  head_dim +
+					tx * vec_size,
+				h_ptrs[j],
+				(((iter + num_stages_smem) * bdz + tz) * bdy + ty) * tile_size_per_bdx +
+						j <
 					h_chunk_len);
 		}
 		cp_async::commit_group();
@@ -1234,6 +1464,83 @@ MaxPossibleSampleWithPagedKVCache(DTypeIn* q,
 				kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
 			void* args[] = {(void*)&q, (void*)&paged_hadamard, (void*)&o, (void*)&output_len};
 			nvtxRangePushA("compute_manhatton_distances");
+			FLASHINFER_CUDA_CALL(
+				cudaLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream));
+			nvtxRangePop();
+		});
+	return cudaSuccess;
+}
+
+template <PageStorage page_storage,
+		  QKVLayout kv_layout,
+		  typename DTypeIn,
+		  typename DTypeOut,
+		  typename IdType>
+cudaError_t MaxPossibleSampleGroupMinWithPagedKVCache(
+	DTypeIn* q,
+	paged_kv_t<page_storage, kv_layout, DTypeIn, IdType> paged_hadamard,
+	DTypeOut* o,
+	uint32_t num_qo_heads,
+	uint32_t output_len,
+	RotaryMode rotary_mode = RotaryMode::kNone,
+	cudaStream_t stream = nullptr) {
+	const uint32_t num_kv_heads = paged_hadamard.num_heads;
+	const uint32_t head_dim = paged_hadamard.head_dim;
+	if(num_qo_heads % num_kv_heads != 0) {
+		std::ostringstream err_msg;
+		err_msg << "num_qo_heads " << num_qo_heads << " is not a multiple of num_kv_heads "
+				<< num_kv_heads;
+		throw std::invalid_argument(err_msg.str());
+	}
+	if(rotary_mode != RotaryMode::kNone) {
+		std::ostringstream err_msg;
+		err_msg << "Rotary mode is not supported yet.";
+		throw std::invalid_argument(err_msg.str());
+	}
+
+	SWITCH_GQA_GROUP_SIZE(
+		num_qo_heads / num_kv_heads, GROUP_SIZE, {
+			constexpr uint32_t HEAD_DIM = 16;
+			constexpr uint32_t vec_size = std::max(16UL / sizeof(DTypeIn), HEAD_DIM / 32UL);
+			constexpr uint32_t num_stages_smem = 2U;
+			constexpr uint32_t bdx = HEAD_DIM / vec_size;
+			static_assert(bdx <= 32);
+			constexpr uint32_t bdy = GROUP_SIZE;
+			constexpr uint32_t CHUNK_SIZE = 1024U;
+			constexpr uint32_t num_threads = 128U;
+			constexpr uint32_t tile_size_per_bdx = 4U;
+			constexpr uint32_t bdz = num_threads / (bdx * bdy);
+			constexpr uint32_t entries_per_iter = tile_size_per_bdx * bdy * bdz;
+			static_assert(CHUNK_SIZE % entries_per_iter == 0);
+
+			uint32_t num_chunks = ceil_div(output_len, CHUNK_SIZE);
+			const uint32_t smem_size =
+				2 * num_stages_smem * tile_size_per_bdx * bdy * bdz * head_dim *
+					sizeof(DTypeIn) +
+				tile_size_per_bdx * num_threads * sizeof(DTypeIn*) +
+				bdz * bdy * tile_size_per_bdx * bdy * sizeof(uint16_t);
+
+			dim3 nblks(num_chunks, num_kv_heads);
+			dim3 nthrs(bdx, bdy, bdz);
+			auto kernel =
+				MaxPossibleSampleGroupMinWithPagedKVCacheKernel<false,
+																RotaryMode::kNone,
+																num_stages_smem,
+																tile_size_per_bdx,
+																CHUNK_SIZE,
+																vec_size,
+																bdx,
+																bdy,
+																bdz,
+																page_storage,
+																kv_layout,
+																DTypeIn,
+																DTypeOut,
+																IdType>;
+			FLASHINFER_CUDA_CALL(cudaFuncSetAttribute(
+				kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+			void* args[] = {(void*)&q, (void*)&paged_hadamard, (void*)&o, (void*)&output_len};
+			nvtxRangePushA("compute_group_min_manhatton_distances");
 			FLASHINFER_CUDA_CALL(
 				cudaLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream));
 			nvtxRangePop();
