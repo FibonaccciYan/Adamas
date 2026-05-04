@@ -190,13 +190,12 @@ def main(args):
             from evaluation.llama import enable_tuple_kv_cache_for_llama
             enable_tuple_kv_cache_for_llama()
 
+        config = AutoConfig.from_pretrained(
+            model,
+            trust_remote_code=True,
+        )
+
         if 'qwen3' in model.lower() and args.fixed_length > 32768:
-
-            config = AutoConfig.from_pretrained(
-                model,
-                trust_remote_code=True,
-            )
-
             config.rope_scaling = {
                 "rope_type": "yarn",
                 "factor": 4.0,
@@ -211,13 +210,13 @@ def main(args):
             trust_remote_code=True,
             low_cpu_mem_usage=True,
             attn_implementation="flash_attention_2",
-            config=config # qwen3 yarn
+            config=config
         )
         loaded = loaded.eval()
 
         if args.Adamas:
             print("Enable Adamas attention")
-            from evaluation.adamas_attention import (
+            from evaluation.adamas_attention_qwen3 import (
                 enable_adamas_attention_eval,
             )
 

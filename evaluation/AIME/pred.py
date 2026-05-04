@@ -36,7 +36,6 @@ def parse_args(args=None):
     parser.add_argument("--output_dir", type=str, default="pred")
     parser.add_argument("--Adamas", action="store_true", help="Enable Adamas Attention")
     parser.add_argument("--token_budget", type=int, default=None)
-    parser.add_argument("--chunk_size", type=int, default=None)
     parser.add_argument("--thinking", action="store_true", help="Enable Qwen3 thinking mode (only valid when --model is set to Qwen3)")
     return parser.parse_args(args)
 
@@ -119,12 +118,15 @@ def build_prompt(model_name, tokenizer, problem, enable_thinking=False):
     return prompt
 
 
-def generate_one(model, tokenizer, problem, max_new_tokens, model_name, enable_thinking=False):
+def generate_one(model, tokenizer, problem, max_new_tokens, model_name, enable_thinking=False, Adamas=False):
     prompt = build_prompt(model_name, tokenizer, problem, enable_thinking)
     inputs = tokenizer(prompt, return_tensors="pt", truncation=False).to("cuda")
 
     if "qwen3" in model_name.lower():
-        past_key_values = AdamasDynamicCache()
+        if Adamas:
+            past_key_values = AdamasDynamicCache()
+        else:
+            past_key_values = None
 
         generated_ids = model.generate(
             **inputs,
@@ -180,7 +182,7 @@ def evaluate(model, tokenizer, dataset, args):
     for ex in tqdm(dataset):
         problem = ex["Problem"]
         gold = int(ex["Answer"])
-        generated = generate_one(model, tokenizer, problem, args.max_new_tokens, args.model, args.thinking)
+        generated = generate_one(model, tokenizer, problem, args.max_new_tokens, args.model, args.thinking, args.Adamas)
         pred = extract_answer(generated)
         is_correct = pred == gold
         correct += int(is_correct)

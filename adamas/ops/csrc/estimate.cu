@@ -139,7 +139,6 @@ void estimate_topk_filtering(torch::Tensor q,
 							 torch::Tensor topk_values,
 							 torch::Tensor topk_indices,
 							 torch::Tensor candidate_values,
-							 torch::Tensor candidate_indices,
 							 torch::Tensor topk_buf,
 							 torch::Tensor hadamard_data,
 							 torch::Tensor hadamard_indices,
@@ -157,7 +156,6 @@ void estimate_topk_filtering(torch::Tensor q,
 	CHECK_INPUT(topk_values);
 	CHECK_INPUT(topk_indices);
 	CHECK_INPUT(candidate_values);
-	CHECK_INPUT(candidate_indices);
 	CHECK_INPUT(topk_buf);
 	CHECK_INPUT(hadamard_data);
 	CHECK_INPUT(hadamard_indices);
@@ -168,14 +166,12 @@ void estimate_topk_filtering(torch::Tensor q,
 	CHECK_DIM(2, topk_values);
 	CHECK_DIM(2, topk_indices);
 	CHECK_DIM(2, candidate_values);
-	CHECK_DIM(2, candidate_indices);
 	CHECK_DIM(5, hadamard_data);
 	CHECK_DIM(1, hadamard_indices);
 	CHECK_DIM(1, hadamard_indptr);
 	CHECK_EQ(q.size(0), 1);
 	CHECK_EQ(group_topk_indices.scalar_type(), torch::kInt32);
 	CHECK_EQ(topk_indices.scalar_type(), torch::kInt32);
-	CHECK_EQ(candidate_indices.scalar_type(), torch::kInt32);
 	CHECK_EQ(hadamard_indices.scalar_type(), torch::kInt32);
 	CHECK_EQ(hadamard_indptr.scalar_type(), torch::kInt32);
 	#endif
@@ -213,9 +209,7 @@ void estimate_topk_filtering(torch::Tensor q,
 	CHECK_EQ(topk_values.size(1), page_budget);
 	CHECK_EQ(topk_indices.size(1), page_budget);
 	CHECK_EQ(candidate_values.size(0), num_kv_heads);
-	CHECK_EQ(candidate_indices.size(0), num_kv_heads);
 	CHECK_EQ(candidate_values.size(1), estimate_len);
-	CHECK_EQ(candidate_indices.size(1), estimate_len);
 	CHECK_GE(estimate_len, page_budget);
 	#endif
 

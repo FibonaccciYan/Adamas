@@ -90,6 +90,15 @@ if(BUILD_BENCH)
     target_include_directories(bench_max_possible PRIVATE ${CMAKE_SOURCE_DIR}/src/include)
     target_link_libraries(bench_max_possible PRIVATE nvbench::main)
 
+    # ------------- compile bench_fused_estimate_topk -----------------#
+    add_executable(bench_fused_estimate_topk ${CMAKE_SOURCE_DIR}/src/bench/bench_fused_estimate_topk.cu)
+    target_include_directories(bench_fused_estimate_topk PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    target_include_directories(bench_fused_estimate_topk PRIVATE ${CMAKE_SOURCE_DIR}/3rdparty/nvbench)
+    target_include_directories(bench_fused_estimate_topk PRIVATE ${CMAKE_SOURCE_DIR}/3rdparty/flashinfer/include)
+    target_include_directories(bench_fused_estimate_topk PRIVATE ${CMAKE_SOURCE_DIR}/src/include)
+    target_compile_options(bench_fused_estimate_topk PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda --expt-relaxed-constexpr>)
+    target_link_libraries(bench_fused_estimate_topk PRIVATE raft::raft nvbench::main)
+
     # # ------------- compile test_prefill -----------------#
     # add_executable(test_prefill ${CMAKE_SOURCE_DIR}/src/test/test_prefill.cu)
     # target_include_directories(test_prefill PRIVATE ${CMAKE_SOURCE_DIR}/include)

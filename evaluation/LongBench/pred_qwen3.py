@@ -10,7 +10,7 @@ from tqdm import tqdm
 import numpy as np
 import random
 import argparse
-from evaluation.adamas_attention import enable_adamas_attention_eval 
+from evaluation.adamas_attention_qwen3 import enable_adamas_attention_eval 
 from evaluation.adamas_cache import AdamasDynamicCache
 
 
@@ -21,7 +21,6 @@ def parse_args(args=None):
         type=str,
         default=None,
         choices=[
-            "longchat-v1.5-7b-32k",
             "Meta-Llama-3.1-8B-Instruct",
             "Qwen3-8b",
         ],
@@ -40,14 +39,7 @@ def parse_args(args=None):
 
 # This is the customized building prompt for chat models
 def build_chat(tokenizer, prompt, model_name, enable_thinking=False):
-    if "longchat" in model_name.lower():
-        from fastchat.model import get_conversation_template
-
-        conv = get_conversation_template("vicuna")
-        conv.append_message(conv.roles[0], prompt)
-        conv.append_message(conv.roles[1], None)
-        prompt = conv.get_prompt()
-    elif "llama-3.1" in model_name.lower() or "meta-llama-3.1" in model_name.lower():
+    if "llama-3.1" in model_name.lower() or "meta-llama-3.1" in model_name.lower():
         prompt = tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt}],
             tokenize=False,

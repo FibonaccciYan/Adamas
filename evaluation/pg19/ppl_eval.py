@@ -26,7 +26,6 @@ parser.add_argument("--num_eval_tokens", type=int, default=None)
 
 parser.add_argument("--Adamas", action="store_true", help="Enable Adamas attention")
 parser.add_argument("--token_budget", type=int, default=1024)
-parser.add_argument("--chunk_size", type=int, default=16)
 parser.add_argument("--thinking", action="store_true", help="Enable Qwen3 thinking mode (only valid when --model is set to Qwen3)")
 
 
@@ -40,7 +39,7 @@ def load(model_name_or_path):
     model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
         device_map="auto",
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float16,
         trust_remote_code=True, 
         attn_implementation="flash_attention_2"
     )
@@ -71,7 +70,7 @@ else:
 
 if args.Adamas:
     print("Enable Adamas attention")
-    from evaluation.adamas_attention import (
+    from evaluation.adamas_attention_qwen3 import (
         enable_adamas_attention_eval,
     )
 

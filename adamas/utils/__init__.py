@@ -340,7 +340,6 @@ def decode_estimate_topk(
         iController.topk_dout_buffer,
         iController.topk_dindices_buffer,
         iController.estimate_topk_candidate_values,
-        iController.estimate_topk_candidate_indices,
         iController.topk_buf,
         iController.hadamard_cache.buf_layer(layer_idx),
         iController.hadamard_indices,
