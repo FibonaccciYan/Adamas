@@ -34,14 +34,6 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/3rdparty/nvbench)
 add_subdirectory(${CMAKE_SOURCE_DIR}/3rdparty/googletest)
 
 if(BUILD_BENCH)
-    # # ------------- compile bench_decode_select_k -----------------#
-    # add_executable(bench_decode_select_k ${CMAKE_SOURCE_DIR}/src/bench/bench_decode_select_k.cu)
-    # target_include_directories(bench_decode_select_k PRIVATE ${CMAKE_SOURCE_DIR}/include)
-    # target_include_directories(bench_decode_select_k PRIVATE ${CMAKE_SOURCE_DIR}/3rdparty/nvbench)
-    # target_include_directories(bench_decode_select_k PRIVATE ${CMAKE_SOURCE_DIR}/src/include)
-    # target_compile_options(bench_decode_select_k PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda --expt-relaxed-constexpr>)
-    # target_link_libraries(bench_decode_select_k PRIVATE raft::raft nvbench::main)
-
     # ------------- compile bench_batch_decode -----------------#
     add_executable(bench_batch_decode ${CMAKE_SOURCE_DIR}/src/bench/bench_batch_decode.cu)
     target_include_directories(bench_batch_decode PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -73,22 +65,6 @@ if(BUILD_BENCH)
     # target_include_directories(test_page PRIVATE ${CMAKE_SOURCE_DIR}/3rdparty/flashinfer/include)
     # target_include_directories(test_page PRIVATE ${CMAKE_SOURCE_DIR}/src/include)
     # target_link_libraries(test_page PRIVATE gtest gtest_main)
-
-    # # ------------- compile test_max_possible -----------------#
-    # add_executable(test_max_possible ${CMAKE_SOURCE_DIR}/src/test/test_max_possible.cu)
-    # target_include_directories(test_max_possible PRIVATE ${CMAKE_SOURCE_DIR}/include)
-    # target_include_directories(test_max_possible PRIVATE ${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
-    # target_include_directories(test_max_possible PRIVATE ${CMAKE_SOURCE_DIR}/3rdparty/flashinfer/include)
-    # target_include_directories(test_max_possible PRIVATE ${CMAKE_SOURCE_DIR}/src/include)
-    # target_link_libraries(test_max_possible PRIVATE gtest gtest_main)
-
-    # # ------------- compile bench_max_possible -----------------#
-    # add_executable(bench_max_possible ${CMAKE_SOURCE_DIR}/src/bench/bench_max_possible.cu)
-    # target_include_directories(bench_max_possible PRIVATE ${CMAKE_SOURCE_DIR}/include)
-    # target_include_directories(bench_max_possible PRIVATE ${CMAKE_SOURCE_DIR}/3rdparty/nvbench)
-    # target_include_directories(bench_max_possible PRIVATE ${CMAKE_SOURCE_DIR}/3rdparty/flashinfer/include)
-    # target_include_directories(bench_max_possible PRIVATE ${CMAKE_SOURCE_DIR}/src/include)
-    # target_link_libraries(bench_max_possible PRIVATE nvbench::main)
 
     # ------------- compile bench_fused_estimate_topk -----------------#
     add_executable(bench_fused_estimate_topk ${CMAKE_SOURCE_DIR}/src/bench/bench_fused_estimate_topk.cu)
