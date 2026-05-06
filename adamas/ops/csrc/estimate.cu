@@ -243,6 +243,13 @@ void estimate_topk_filtering(torch::Tensor q,
 						"Estimate_topk group-min estimation failed with error code ",
 						cudaGetErrorString(status));
 
+			c_type* selected_values = num_qo_heads == num_kv_heads
+										  ? static_cast<c_type*>(topk_values.data_ptr())
+										  : static_cast<c_type*>(group_topk_values.data_ptr());
+			int32_t* selected_indices = num_qo_heads == num_kv_heads
+											? static_cast<int32_t*>(topk_indices.data_ptr())
+											: static_cast<int32_t*>(group_topk_indices.data_ptr());
+
 			if(num_kv_heads == 8) {
 				decode_select_k<c_type, int32_t, 8>(
 					static_cast<c_type*>(candidate_values.data_ptr()),
@@ -250,8 +257,8 @@ void estimate_topk_filtering(torch::Tensor q,
 					static_cast<char*>(topk_buf.data_ptr()),
 					estimate_len,
 					page_budget,
-					static_cast<c_type*>(group_topk_values.data_ptr()),
-					static_cast<int32_t*>(group_topk_indices.data_ptr()),
+					selected_values,
+					selected_indices,
 					false);
 			} else if(num_kv_heads == 32) {
 				decode_select_k<c_type, int32_t, 32>(
@@ -260,24 +267,26 @@ void estimate_topk_filtering(torch::Tensor q,
 					static_cast<char*>(topk_buf.data_ptr()),
 					estimate_len,
 					page_budget,
-					static_cast<c_type*>(group_topk_values.data_ptr()),
-					static_cast<int32_t*>(group_topk_indices.data_ptr()),
+					selected_values,
+					selected_indices,
 					false);
 			} else {
 				TORCH_CHECK(false, "estimate_topk_filtering only supports num_kv_heads 8 or 32, got ", num_kv_heads);
 			}
 
-			status = adamas_estimate_topk::BroadcastGroupTopK<c_type>(
-				static_cast<c_type*>(group_topk_values.data_ptr()),
-				static_cast<int32_t*>(group_topk_indices.data_ptr()),
-				static_cast<c_type*>(topk_values.data_ptr()),
-				static_cast<int32_t*>(topk_indices.data_ptr()),
-				num_qo_heads,
-				num_kv_heads,
-				page_budget);
-			TORCH_CHECK(status == cudaSuccess,
-						"Estimate_topk broadcast failed with error code ",
-						cudaGetErrorString(status));
+			if(num_qo_heads != num_kv_heads) {
+				status = adamas_estimate_topk::BroadcastGroupTopK<c_type>(
+					static_cast<c_type*>(group_topk_values.data_ptr()),
+					static_cast<int32_t*>(group_topk_indices.data_ptr()),
+					static_cast<c_type*>(topk_values.data_ptr()),
+					static_cast<int32_t*>(topk_indices.data_ptr()),
+					num_qo_heads,
+					num_kv_heads,
+					page_budget);
+				TORCH_CHECK(status == cudaSuccess,
+							"Estimate_topk broadcast failed with error code ",
+							cudaGetErrorString(status));
+			}
 		});
 		return true;
 	});

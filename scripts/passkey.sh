@@ -2,8 +2,10 @@ cd evaluation/passkey
 
 MODEL=Qwen3-8b
 MODELPATH=/data1/model/qwen/Qwen/Qwen3-8B
-OUTPUT_DIR=results/$MODEL
+# MODEL="Meta-Llama-3.1-8B-Instruct"
+# MODELPATH=/data1/model/llama3/meta-llama/Llama-3.1-8B-Instruct
 
+OUTPUT_DIR=results/$MODEL
 mkdir -p $OUTPUT_DIR
 
 length=100000

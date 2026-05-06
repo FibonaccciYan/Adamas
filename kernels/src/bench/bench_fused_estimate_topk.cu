@@ -79,8 +79,8 @@ void bench_fused_estimate_topk(nvbench::state& state) {
 	if(num_qo_heads % num_kv_heads != 0) {
 		state.skip("num_qo_heads must be divisible by num_kv_heads");
 	}
-	if(num_kv_heads != 8) {
-		state.skip("decode_select_k instantiation in this bench supports num_kv_heads=8");
+	if(num_kv_heads != 8 and num_kv_heads != 32) {
+		state.skip("decode_select_k instantiation in this bench supports num_kv_heads=8 or 32");
 	}
 
 	size_t num_pages = flashinfer::ceil_div(seqlen, page_size);
@@ -153,26 +153,47 @@ void bench_fused_estimate_topk(nvbench::state& state) {
 			return;
 		}
 
-		decode_select_k<T, int32_t, 8>(
-			thrust::raw_pointer_cast(candidate_values.data()),
-			nullptr,
-			thrust::raw_pointer_cast(topk_buf.data()),
-			estimate_len,
-			k,
-			thrust::raw_pointer_cast(group_topk_values.data()),
-			thrust::raw_pointer_cast(group_topk_indices.data()),
-			false);
+		T* selected_values = num_qo_heads == num_kv_heads
+								 ? thrust::raw_pointer_cast(qo_topk_values.data())
+								 : thrust::raw_pointer_cast(group_topk_values.data());
+		int32_t* selected_indices = num_qo_heads == num_kv_heads
+										? thrust::raw_pointer_cast(qo_topk_indices.data())
+										: thrust::raw_pointer_cast(group_topk_indices.data());
 
-		status = adamas_bench::BroadcastGroupTopK<T>(
-			thrust::raw_pointer_cast(group_topk_values.data()),
-			thrust::raw_pointer_cast(group_topk_indices.data()),
-			thrust::raw_pointer_cast(qo_topk_values.data()),
-			thrust::raw_pointer_cast(qo_topk_indices.data()),
-			num_qo_heads,
-			num_kv_heads,
-			k);
-		if(status != cudaSuccess) {
-			state.skip("broadcast CUDA error: " + std::string(cudaGetErrorString(status)));
+		if(num_kv_heads == 8) {
+			decode_select_k<T, int32_t, 8>(
+				thrust::raw_pointer_cast(candidate_values.data()),
+				nullptr,
+				thrust::raw_pointer_cast(topk_buf.data()),
+				estimate_len,
+				k,
+				selected_values,
+				selected_indices,
+				false);
+		} else if(num_kv_heads == 32) {
+			decode_select_k<T, int32_t, 32>(
+				thrust::raw_pointer_cast(candidate_values.data()),
+				nullptr,
+				thrust::raw_pointer_cast(topk_buf.data()),
+				estimate_len,
+				k,
+				selected_values,
+				selected_indices,
+				false);
+		}
+
+		if(num_qo_heads != num_kv_heads) {
+			status = adamas_bench::BroadcastGroupTopK<T>(
+				thrust::raw_pointer_cast(group_topk_values.data()),
+				thrust::raw_pointer_cast(group_topk_indices.data()),
+				thrust::raw_pointer_cast(qo_topk_values.data()),
+				thrust::raw_pointer_cast(qo_topk_indices.data()),
+				num_qo_heads,
+				num_kv_heads,
+				k);
+			if(status != cudaSuccess) {
+				state.skip("broadcast CUDA error: " + std::string(cudaGetErrorString(status)));
+			}
 		}
 	});
 }
@@ -184,9 +205,9 @@ void bench_fused_estimate_topk(nvbench::state& state) {
 	NVBENCH_BENCH(bench_fused_estimate_topk_##dtype##_)                           \
 		.set_name("bench_fused_estimate_topk_" STR(dtype))                        \
 		.add_int64_axis("seqlen", {16384, 32768, 65536, 131072})                  \
-		.add_int64_axis("page_budget", {256, 512, 1024, 2048, 4096})                   \
+		.add_int64_axis("page_budget", {256, 512, 1024, 2048, 4096})              \
 		.add_int64_axis("page_size", {1})                                         \
 		.add_int64_axis("num_qo_heads", {32})                                     \
-		.add_int64_axis("num_kv_heads", {8})
+		.add_int64_axis("num_kv_heads", {8, 32})
 
 BENCH_FUSED_ESTIMATE_TOPK(half);

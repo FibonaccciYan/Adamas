@@ -203,7 +203,6 @@ def evaluate(model, tokenizer, dataset, args):
         "split": args.split,
         "adamas": args.Adamas,
         "token_budget": args.token_budget if args.Adamas else None,
-        "chunk_size": args.chunk_size if args.Adamas else None,
         "max_new_tokens": args.max_new_tokens,
         "num_samples": len(results),
         "correct": correct,
