@@ -97,12 +97,12 @@ def adamas_forward(
         query_code_grouped = query_code.view(
             bsz, self.num_key_value_heads, self.num_key_value_groups, q_len, self.head_dim
         )
-        distances = (query_code_grouped[:, :, :, :, None, :] - key_code[:, :, None, None, :, :]).abs().sum(dim=-1)
+        distances = (query_code_grouped[:, :, :, :, None, :] - key_code[:, :, None, None, :, :]).float().pow(2).sum(dim=-1).sqrt()
         group_distances = distances.min(dim=2).values
         _, group_topk_indices = group_distances.topk(k=token_budget, dim=-1, largest=False)
         topk_indices = group_topk_indices.repeat_interleave(self.num_key_value_groups, dim=1)
     else:
-        distances = (query_code[:, :, :, None, :] - key_code[:, :, None, :, :]).abs().sum(dim=-1)
+        distances = (query_code[:, :, :, None, :] - key_code[:, :, None, :, :]).float().pow(2).sum(dim=-1).sqrt()
         _, topk_indices = distances.topk(k=token_budget, dim=-1, largest=False)
 
     key_states = repeat_kv(key_states, self.num_key_value_groups)
