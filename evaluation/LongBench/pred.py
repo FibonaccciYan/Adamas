@@ -10,7 +10,7 @@ from tqdm import tqdm
 import numpy as np
 import random
 import argparse
-from evaluation.adamas_attention import enable_adamas_attention_eval 
+from evaluation.adamas_attention import ADAMAS_FORWARD_VARIANTS, enable_adamas_attention_eval 
 from evaluation.adamas_cache import AdamasDynamicCache
 
 
@@ -33,6 +33,13 @@ def parse_args(args=None):
     parser.add_argument("--token_budget", type=int, default=None)
     parser.add_argument("--chunk_size", type=int, default=None)
     parser.add_argument("--Adamas", action="store_true", help="Enable Adamas Attention")
+    parser.add_argument(
+        "--adamas_variant",
+        type=str,
+        default="adamas",
+        choices=sorted(ADAMAS_FORWARD_VARIANTS),
+        help="Adamas forward variant to bind for this model instance.",
+    )
     parser.add_argument("--thinking", action="store_true", help="Enable Qwen3 thinking mode (only valid when --model is set to Qwen3)")
 
     return parser.parse_args(args)
@@ -284,7 +291,7 @@ if __name__ == "__main__":
                 os.makedirs(f"pred_e/{model_name}")
             out_path = f"pred_e/{model_name}/{dataset}.jsonl"
             if args.Adamas:
-                out_path = f"pred_e/{model_name}/{dataset}-{args.token_budget}.jsonl"
+                out_path = f"pred_e/{model_name}/{dataset}-{args.adamas_variant}-{args.token_budget}.jsonl"
             else:
                 out_path = f"pred_e/{model_name}/{dataset}-full.jsonl"
         else:
@@ -292,7 +299,7 @@ if __name__ == "__main__":
             if not os.path.exists(f"pred/{model_name}"):
                 os.makedirs(f"pred/{model_name}")
             if args.Adamas:
-                out_path = f"pred/{model_name}/{dataset}-{args.token_budget}.jsonl"
+                out_path = f"pred/{model_name}/{dataset}-{args.adamas_variant}-{args.token_budget}.jsonl"
             else:
                 out_path = f"pred/{model_name}/{dataset}-full.jsonl"
         prompt_format = dataset2prompt[dataset]

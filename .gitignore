@@ -218,6 +218,7 @@ outputs/
 evaluation/LongBench/pred
 evaluation/LongBench/pred_e
 evaluation/LongBench/pred_threshold
+evaluation/LongBench/pred_e_threshold
 evaluation/passkey/results
 evaluation/pg19/results
 evaluation/RULER/scripts/benchmark_root

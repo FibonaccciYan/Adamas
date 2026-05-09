@@ -74,6 +74,13 @@ def scorer(dataset, predictions, answers, all_classes):
         total_score += score
     return round(100 * total_score / len(predictions), 2)
 
+def dataset_name_from_filename(filename):
+    stem = filename[:-len(".jsonl")]
+    for dataset in sorted(dataset2metric.keys(), key=len, reverse=True):
+        if stem == dataset or stem.startswith(f"{dataset}-"):
+            return dataset
+    raise ValueError(f"Cannot infer dataset name from filename: {filename}")
+
 if __name__ == '__main__':
     args = parse_args()
     scores = dict()
@@ -87,7 +94,7 @@ if __name__ == '__main__':
         if not filename.endswith("jsonl"):
             continue
         predictions, answers, lengths = [], [], []
-        dataset = filename.split('-')[0]
+        dataset = dataset_name_from_filename(filename)
         with open(f"{path}{filename}", "r", encoding="utf-8") as f:
             for line in f:
                 data = json.loads(line)

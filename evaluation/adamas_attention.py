@@ -19,6 +19,28 @@ from transformers.modeling_flash_attention_utils import _flash_attention_forward
 
 import faster_hadamard_transform
 
+ADAMAS_FORWARD_VARIANTS = {
+    "adamas": "adamas_forward",
+    "no_hadamard": "adamas_forward_no_hadamard",
+    "l2_distance": "adamas_forward_l2_distance",
+    "thresholds_5sigma": "adamas_forward_thresholds_5sigma",
+}
+
+
+def _default_thresholds(query_states: torch.Tensor, key_states: torch.Tensor):
+    thresholds_q = torch.tensor([-1.35, 0, 1.35], device=query_states.device)
+    thresholds_k = torch.tensor([-2.26, 0, 2.26], device=key_states.device)
+    return thresholds_q, thresholds_k
+
+
+def _five_sigma_thresholds(query_states: torch.Tensor, key_states: torch.Tensor):
+    query_sigma = query_states.float().std()
+    key_sigma = key_states.float().std()
+    query_multipliers = torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0], device=query_states.device, dtype=query_sigma.dtype)
+    key_multipliers = torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0], device=key_states.device, dtype=key_sigma.dtype)
+    return (query_multipliers * query_sigma).to(query_states.dtype), (key_multipliers * key_sigma).to(key_states.dtype)
+
+
 @torch.jit.script
 def repeat_kv_yarn(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """
@@ -136,7 +158,7 @@ def flash_attention_forward(
         return attn_output, attn_weights, past_key_value
 
 
-def adamas_forward(
+def _adamas_forward_impl(
     self,
     hidden_states: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -146,6 +168,9 @@ def adamas_forward(
     use_cache: bool = False,
     cache_position: Optional[torch.LongTensor] = None,
     position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.46
+    use_hadamard: bool = True,
+    distance_metric: str = "l1",
+    threshold_mode: str = "default",
     **kwargs,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
     bsz, q_len, _ = hidden_states.size()
@@ -206,22 +231,46 @@ def adamas_forward(
     #     cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
     #     key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-    thresholds_q = torch.tensor([-1.35, 0, 1.35], device=query_states.device)
-    thresholds_k = torch.tensor([-2.26, 0, 2.26], device=key_states.device)
-    query_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(query_states, inplace=False), thresholds_q, out_int32=True)
-    key_code   = torch.bucketize(faster_hadamard_transform.hadamard_transform(key_states, inplace=False), thresholds_k, out_int32=True)
+    if use_hadamard:
+        query_repr = faster_hadamard_transform.hadamard_transform(query_states, inplace=False)
+        key_repr = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
+    else:
+        query_repr = query_states
+        key_repr = key_states
+
+    if threshold_mode == "five_sigma":
+        thresholds_q, thresholds_k = _five_sigma_thresholds(query_repr, key_repr)
+    elif threshold_mode == "default":
+        thresholds_q, thresholds_k = _default_thresholds(query_repr, key_repr)
+    else:
+        raise ValueError(f"Unknown Adamas threshold mode: {threshold_mode}")
+
+    query_code = torch.bucketize(query_repr, thresholds_q, out_int32=True)
+    key_code   = torch.bucketize(key_repr, thresholds_k, out_int32=True)
     
     token_budget = min(self.token_budget, key_code.shape[-2])
     if self.num_key_value_groups > 1:
         query_code_grouped = query_code.view(
             bsz, self.num_key_value_heads, self.num_key_value_groups, q_len, self.head_dim
         )
-        distances = (query_code_grouped[:, :, :, :, None, :] - key_code[:, :, None, None, :, :]).abs().sum(dim=-1)
+        code_delta = query_code_grouped[:, :, :, :, None, :] - key_code[:, :, None, None, :, :]
+        if distance_metric == "l2":
+            distances = code_delta.float().pow(2).sum(dim=-1).sqrt()
+        elif distance_metric == "l1":
+            distances = code_delta.abs().sum(dim=-1)
+        else:
+            raise ValueError(f"Unknown Adamas distance metric: {distance_metric}")
         group_distances = distances.min(dim=2).values
         _, group_topk_indices = group_distances.topk(k=token_budget, dim=-1, largest=False)
         topk_indices = group_topk_indices.repeat_interleave(self.num_key_value_groups, dim=1)
     else:
-        distances = (query_code[:, :, :, None, :] - key_code[:, :, None, :, :]).abs().sum(dim=-1)
+        code_delta = query_code[:, :, :, None, :] - key_code[:, :, None, :, :]
+        if distance_metric == "l2":
+            distances = code_delta.float().pow(2).sum(dim=-1).sqrt()
+        elif distance_metric == "l1":
+            distances = code_delta.abs().sum(dim=-1)
+        else:
+            raise ValueError(f"Unknown Adamas distance metric: {distance_metric}")
         _, topk_indices = distances.topk(k=token_budget, dim=-1, largest=False)
 
     key_states = repeat_kv(key_states, self.num_key_value_groups)
@@ -263,6 +312,122 @@ def adamas_forward(
         attn_weights = None
 
     return attn_output, attn_weights, past_key_value
+
+
+def adamas_forward(
+    self,
+    hidden_states: torch.Tensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    past_key_value: Optional[Tuple[torch.Tensor]] = None,
+    output_attentions: bool = False,
+    use_cache: bool = False,
+    cache_position: Optional[torch.LongTensor] = None,
+    position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    **kwargs,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+    return _adamas_forward_impl(
+        self,
+        hidden_states,
+        attention_mask,
+        position_ids,
+        past_key_value,
+        output_attentions,
+        use_cache,
+        cache_position,
+        position_embeddings,
+        use_hadamard=True,
+        distance_metric="l1",
+        threshold_mode="default",
+        **kwargs,
+    )
+
+
+def adamas_forward_no_hadamard(
+    self,
+    hidden_states: torch.Tensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    past_key_value: Optional[Tuple[torch.Tensor]] = None,
+    output_attentions: bool = False,
+    use_cache: bool = False,
+    cache_position: Optional[torch.LongTensor] = None,
+    position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    **kwargs,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+    return _adamas_forward_impl(
+        self,
+        hidden_states,
+        attention_mask,
+        position_ids,
+        past_key_value,
+        output_attentions,
+        use_cache,
+        cache_position,
+        position_embeddings,
+        use_hadamard=False,
+        distance_metric="l1",
+        threshold_mode="default",
+        **kwargs,
+    )
+
+
+def adamas_forward_l2_distance(
+    self,
+    hidden_states: torch.Tensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    past_key_value: Optional[Tuple[torch.Tensor]] = None,
+    output_attentions: bool = False,
+    use_cache: bool = False,
+    cache_position: Optional[torch.LongTensor] = None,
+    position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    **kwargs,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+    return _adamas_forward_impl(
+        self,
+        hidden_states,
+        attention_mask,
+        position_ids,
+        past_key_value,
+        output_attentions,
+        use_cache,
+        cache_position,
+        position_embeddings,
+        use_hadamard=True,
+        distance_metric="l2",
+        threshold_mode="default",
+        **kwargs,
+    )
+
+
+def adamas_forward_thresholds_5sigma(
+    self,
+    hidden_states: torch.Tensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    past_key_value: Optional[Tuple[torch.Tensor]] = None,
+    output_attentions: bool = False,
+    use_cache: bool = False,
+    cache_position: Optional[torch.LongTensor] = None,
+    position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    **kwargs,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+    return _adamas_forward_impl(
+        self,
+        hidden_states,
+        attention_mask,
+        position_ids,
+        past_key_value,
+        output_attentions,
+        use_cache,
+        cache_position,
+        position_embeddings,
+        use_hadamard=True,
+        distance_metric="l1",
+        threshold_mode="five_sigma",
+        **kwargs,
+    )
 
 
 def yarn_forward(
@@ -386,24 +551,26 @@ def yarn_forward(
     return attn_output, attn_weights, past_key_value
 
 
-global layer_id
-layer_id = 32
-
 def enable_adamas_attention_eval(model, args):
-    for name, module in reversed(model._modules.items()):
-        if len(list(module.children())) > 0:
-            enable_adamas_attention_eval(
-                module,
-                args,
-            )
+    variant = getattr(args, "adamas_variant", "adamas")
+    if variant not in ADAMAS_FORWARD_VARIANTS:
+        raise ValueError(f"Unknown Adamas variant: {variant}. Choices: {sorted(ADAMAS_FORWARD_VARIANTS)}")
 
-        global layer_id
-        if name == "self_attn":
-            layer_id -= 1
-            model._modules[name].layer_id = layer_id
-            model._modules[name].flash_forward = model._modules[name].forward
-            model._modules[name].forward = types.MethodType(
-                adamas_forward, model._modules[name]
-            )
+    forward_fn = globals()[ADAMAS_FORWARD_VARIANTS[variant]]
+    self_attn_modules = []
 
-            model._modules[name].token_budget = args.token_budget
+    def collect_self_attn(module):
+        for name, child in module._modules.items():
+            if len(list(child.children())) > 0:
+                collect_self_attn(child)
+            if name == "self_attn":
+                self_attn_modules.append(child)
+
+    collect_self_attn(model)
+
+    for layer_id, module in enumerate(self_attn_modules):
+        module.layer_id = layer_id
+        module.flash_forward = module.forward
+        module.forward = types.MethodType(forward_fn, module)
+        module.token_budget = args.token_budget
+        module.adamas_variant = variant
