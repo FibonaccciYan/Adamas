@@ -85,12 +85,10 @@ def adamas_forward(
             value_states = torch.cat([past_key_value[1], value_states], dim=2)
         past_key_value = (key_states, value_states) if use_cache else None
 
-    query_hadamard = faster_hadamard_transform.hadamard_transform(query_states, inplace=False)
-    key_hadamard = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
-    thresholds_q = _sigma_thresholds(query_hadamard, self.sigma_times)
-    thresholds_k = _sigma_thresholds(key_hadamard, self.sigma_times)
-    query_code = torch.bucketize(query_hadamard, thresholds_q, out_int32=True)
-    key_code = torch.bucketize(key_hadamard, thresholds_k, out_int32=True)
+    thresholds_q = _sigma_thresholds(query_states, self.sigma_times)
+    thresholds_k = _sigma_thresholds(key_states, self.sigma_times)
+    query_code = torch.bucketize(query_states, thresholds_q, out_int32=True)
+    key_code = torch.bucketize(key_states, thresholds_k, out_int32=True)
 
     token_budget = min(self.token_budget, key_code.shape[-2])
     if self.num_key_value_groups > 1:

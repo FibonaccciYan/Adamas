@@ -208,8 +208,8 @@ def adamas_forward(
 
     thresholds_q = torch.tensor([-1.35, 0, 1.35], device=query_states.device)
     thresholds_k = torch.tensor([-2.26, 0, 2.26], device=key_states.device)
-    query_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(query_states, inplace=False), thresholds_q, out_int32=True)
-    key_code   = torch.bucketize(faster_hadamard_transform.hadamard_transform(key_states, inplace=False), thresholds_k, out_int32=True)
+    query_code = torch.bucketize(query_states, thresholds_q, out_int32=True)
+    key_code   = torch.bucketize(key_states, thresholds_k, out_int32=True)
     
     token_budget = min(self.token_budget, key_code.shape[-2])
     if self.num_key_value_groups > 1:
