@@ -19,6 +19,11 @@ from transformers.modeling_flash_attention_utils import _flash_attention_forward
 
 import faster_hadamard_transform
 
+def _five_sigma_thresholds(states: torch.Tensor) -> torch.Tensor:
+    sigma = states.float().std()
+    multipliers = torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0], device=states.device, dtype=sigma.dtype)
+    return (multipliers * sigma).to(states.dtype)
+
 @torch.jit.script
 def repeat_kv_yarn(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """
@@ -206,10 +211,12 @@ def adamas_forward(
     #     cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
     #     key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-    thresholds_q = torch.tensor([-1.35, 0, 1.35], device=query_states.device)
-    thresholds_k = torch.tensor([-2.26, 0, 2.26], device=key_states.device)
-    query_code = torch.bucketize(faster_hadamard_transform.hadamard_transform(query_states, inplace=False), thresholds_q, out_int32=True)
-    key_code   = torch.bucketize(faster_hadamard_transform.hadamard_transform(key_states, inplace=False), thresholds_k, out_int32=True)
+    query_hadamard = faster_hadamard_transform.hadamard_transform(query_states, inplace=False)
+    key_hadamard = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
+    thresholds_q = _five_sigma_thresholds(query_hadamard)
+    thresholds_k = _five_sigma_thresholds(key_hadamard)
+    query_code = torch.bucketize(query_hadamard, thresholds_q, out_int32=True)
+    key_code   = torch.bucketize(key_hadamard, thresholds_k, out_int32=True)
     
     token_budget = min(self.token_budget, key_code.shape[-2])
     if self.num_key_value_groups > 1:

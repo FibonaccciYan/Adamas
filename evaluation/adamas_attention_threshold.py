@@ -18,9 +18,8 @@ import faster_hadamard_transform
 
 def _sigma_thresholds(states: torch.Tensor, sigma_times: float) -> torch.Tensor:
     sigma = states.float().std()
-    scale = torch.as_tensor(sigma_times, device=states.device, dtype=sigma.dtype)
-    zero = torch.zeros((), device=states.device, dtype=sigma.dtype)
-    return torch.stack((-scale * sigma, zero, scale * sigma)).to(states.dtype)
+    multipliers = torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0], device=states.device, dtype=sigma.dtype)
+    return (multipliers * sigma).to(states.dtype)
 
 
 def adamas_forward(
