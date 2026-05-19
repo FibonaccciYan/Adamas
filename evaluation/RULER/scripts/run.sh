@@ -50,7 +50,7 @@ ROOT_DIR=${ROOT_DIR:-benchmark_root}
 MODEL_DIR=${MODEL_DIR:-../..}
 ENGINE_DIR=${ENGINE_DIR:-.}
 BATCH_SIZE=${BATCH_SIZE:-1}
-PYTHON_BIN=${PYTHON_BIN:-/home/ysy/anaconda3/envs/hsa/bin/python}
+PYTHON_BIN=${PYTHON_BIN:-/path/to/python}
 
 source config_models.sh
 MODEL_NAME=${1}

@@ -27,7 +27,7 @@ class ModelConfig:
 MODEL_CFGS = {
     "Llama-3.1-8B-Instruct":
         ModelConfig(
-            model_path="/data1/model/llama3/meta-llama/Llama-3.1-8B-Instruct"
+            model_path="meta-llama/Llama-3.1-8B-Instruct"
         )
 }
 

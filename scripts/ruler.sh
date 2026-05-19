@@ -4,8 +4,8 @@ set -euo pipefail
 GPU=${GPU:-0}
 MODEL_NAME=${MODEL_NAME:-llama3.1-8b-instruct}
 BENCHMARK=${BENCHMARK:-synthetic}
-PYTHONPATH_ROOT=${PYTHONPATH_ROOT:-/data0/ysy/Adamas}
-PYTHON_BIN=${PYTHON_BIN:-/home/ysy/anaconda3/envs/hsa/bin/python}
+PYTHONPATH_ROOT=${PYTHONPATH_ROOT:-/path/to/Adamas}
+PYTHON_BIN=${PYTHON_BIN:-/path/to/python}
 ADAMAS_BUDGETS=${ADAMAS_BUDGETS:-"256 512 1024 2048 4096"}
 ROOT_DIR=${ROOT_DIR:-benchmark_root}
 
@@ -14,7 +14,7 @@ export PYTHONPATH=${PYTHONPATH_ROOT}
 export PYTHON_BIN
 export ROOT_DIR
 
-cd /data0/ysy/Adamas/evaluation/RULER/scripts
+cd /path/to/Adamas/evaluation/RULER/scripts
 
 for BUDGET in ${ADAMAS_BUDGETS}; do
     export ADAMAS_TOKEN_BUDGET=${BUDGET}

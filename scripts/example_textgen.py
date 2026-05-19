@@ -2,7 +2,7 @@ from transformers import AutoTokenizer
 import torch
 import argparse
 
-MODEL_PATH = "/path/to/lmsys/longchat-7b-v1.5-32k"
+MODEL_PATH = "lmsys/longchat-7b-v1.5-32k"
 DEVICE = torch.device("cuda:0")
 DTYPE = torch.float16
 torch.set_default_dtype(DTYPE)

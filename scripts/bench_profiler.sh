@@ -2,11 +2,8 @@ cd scripts
 
 MODEL=Llama-3.1-8B-Instruct
 
-# BUDGET_POOL=('64' '128' '256' '512' '1024' '2048' '4096' '102400') # 102400 is full cache version
-# CONTEXT_POOL=('8192' '16384' '32768')
-
-BUDGET_POOL=('1024' '4096' '102400') # 102400 is full cache version
-CONTEXT_POOL=('8192' '32768')
+BUDGET_POOL=('64' '128' '256' '512' '1024' '2048' '4096' '102400') # 102400 is full cache version
+CONTEXT_POOL=('8192' '16384' '32768')
 
 for budget in "${BUDGET_POOL[@]}"
 do

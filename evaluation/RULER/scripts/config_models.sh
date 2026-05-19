@@ -92,12 +92,12 @@ MODEL_SELECT() {
             GEMINI_API_KEY=""
             ;;
         llama3.1-8b-instruct)
-            MODEL_PATH="/data1/model/llama3/meta-llama/Llama-3.1-8B-Instruct"
+            MODEL_PATH="/path/to/meta-llama/Llama-3.1-8B-Instruct"
             MODEL_TEMPLATE_TYPE="meta-llama3"
             MODEL_FRAMEWORK="hf"
             ;;
         qwen3-8b)
-            MODEL_PATH="/data1/model/qwen/Qwen/Qwen3-8B"
+            MODEL_PATH="/path/to/Qwen/Qwen3-8B"
             MODEL_TEMPLATE_TYPE="qwen3"
             MODEL_FRAMEWORK="hf"
             ;;
