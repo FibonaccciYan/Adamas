@@ -22,6 +22,8 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
+QWEN3_ORIGINAL_MAX_POSITION_EMBEDDINGS = 32768
+
 
 def _normalize_method() -> str:
     method = os.getenv('METHOD', 'full').strip().lower()
@@ -38,15 +40,30 @@ def _normalize_method() -> str:
     return aliases.get(method, method)
 
 
+def _current_ruler_seq_length() -> int:
+    try:
+        return int(os.getenv('RULER_CURRENT_SEQ_LENGTH', '0'))
+    except ValueError:
+        return 0
+
+
+def _qwen3_yarn_factor(seq_length: int) -> float:
+    if seq_length <= QWEN3_ORIGINAL_MAX_POSITION_EMBEDDINGS:
+        return 1.0
+    return seq_length / QWEN3_ORIGINAL_MAX_POSITION_EMBEDDINGS
+
+
 class HuggingFaceModel:
     def __init__(self, name_or_path: str, **generation_kwargs) -> None:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
         self.method = _normalize_method()
         self.tokenizer = AutoTokenizer.from_pretrained(name_or_path, trust_remote_code=True)
-        is_llama = 'llama' in name_or_path.lower()
+        lower_name_or_path = name_or_path.lower()
+        self.is_llama = 'llama' in lower_name_or_path
+        self.is_qwen3 = 'qwen3' in lower_name_or_path
 
-        if is_llama and self.method == 'adamas':
+        if self.is_llama and self.method == 'adamas':
             from evaluation.llama import enable_tuple_kv_cache_for_llama
             enable_tuple_kv_cache_for_llama()
 
@@ -67,21 +84,42 @@ class HuggingFaceModel:
         if 'Yarn-Llama' not in name_or_path:
             model_kwargs['attn_implementation'] = 'flash_attention_2'
 
+        config = AutoConfig.from_pretrained(name_or_path, trust_remote_code=True)
+        if self.is_qwen3:
+            seq_length = _current_ruler_seq_length()
+            yarn_factor = _qwen3_yarn_factor(seq_length)
+            if yarn_factor > 1.0:
+                config.rope_scaling = {
+                    'rope_type': 'yarn',
+                    'factor': yarn_factor,
+                    'original_max_position_embeddings': QWEN3_ORIGINAL_MAX_POSITION_EMBEDDINGS,
+                }
+                config.max_position_embeddings = int(QWEN3_ORIGINAL_MAX_POSITION_EMBEDDINGS * yarn_factor)
+                print(
+                    f'Qwen3 YaRN enabled: seq_length={seq_length}, '
+                    f'factor={yarn_factor:g}, max_position_embeddings={config.max_position_embeddings}'
+                )
+
         self.model = AutoModelForCausalLM.from_pretrained(
             name_or_path,
             trust_remote_code=True,
             device_map='auto',
             torch_dtype=torch.bfloat16,
+            config=config,
             **model_kwargs,
         )
         self.model.eval()
 
-        if is_llama and self.method == 'adamas':
-            from evaluation.adamas_attention import enable_adamas_attention_eval
+        if self.method == 'adamas':
             adamas_args = SimpleNamespace(
                 token_budget=int(os.getenv('ADAMAS_TOKEN_BUDGET', '1024')),
             )
-            enable_adamas_attention_eval(self.model, adamas_args)
+            if self.is_llama:
+                from evaluation.adamas_attention import enable_adamas_attention_eval
+                enable_adamas_attention_eval(self.model, adamas_args)
+            elif self.is_qwen3:
+                from evaluation.adamas_attention_qwen3 import enable_adamas_attention_eval
+                enable_adamas_attention_eval(self.model, adamas_args)
 
         self.generation_kwargs = generation_kwargs
         self.stop = self.generation_kwargs.pop('stop')
@@ -95,6 +133,12 @@ class HuggingFaceModel:
         return self.process_batch([prompt], **kwargs)[0]
 
     def _generate_one_sparse(self, prompt: str) -> str:
+        if self.method == 'adamas' and self.is_qwen3:
+            from evaluation.adamas_cache import AdamasDynamicCache
+            past_key_values = AdamasDynamicCache()
+        else:
+            past_key_values = None
+
         max_new_tokens = int(self.generation_kwargs.get('max_new_tokens', 0))
         inputs = self.tokenizer(prompt, return_tensors='pt').to(self.model.device)
         generated_tokens = []
@@ -103,7 +147,7 @@ class HuggingFaceModel:
             outputs = self.model(
                 input_ids=inputs.input_ids,
                 attention_mask=inputs.get('attention_mask'),
-                past_key_values=None,
+                past_key_values=past_key_values,
                 use_cache=True,
             )
             past_key_values = outputs.past_key_values

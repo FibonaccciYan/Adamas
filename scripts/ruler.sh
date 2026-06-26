@@ -5,7 +5,13 @@ GPU=${GPU:-0}
 MODEL_NAME=${MODEL_NAME:-llama3.1-8b-instruct}
 BENCHMARK=${BENCHMARK:-synthetic}
 PYTHONPATH_ROOT=${PYTHONPATH_ROOT:-/data0/ysy/Adamas}
-PYTHON_BIN=${PYTHON_BIN:-/home/ysy/anaconda3/envs/hsa/bin/python}
+if [ -z "${PYTHON_BIN:-}" ]; then
+    if [ "${MODEL_NAME}" = "qwen3-8b" ]; then
+        PYTHON_BIN=/home/ysy/anaconda3/envs/qwen3/bin/python
+    else
+        PYTHON_BIN=/home/ysy/anaconda3/envs/hsa/bin/python
+    fi
+fi
 ADAMAS_BUDGETS=${ADAMAS_BUDGETS:-"256 512 1024 2048 4096"}
 ROOT_DIR=${ROOT_DIR:-benchmark_root}
 

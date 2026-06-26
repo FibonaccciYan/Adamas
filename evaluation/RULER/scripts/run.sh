@@ -50,10 +50,16 @@ ROOT_DIR=${ROOT_DIR:-benchmark_root}
 MODEL_DIR=${MODEL_DIR:-../..}
 ENGINE_DIR=${ENGINE_DIR:-.}
 BATCH_SIZE=${BATCH_SIZE:-1}
-PYTHON_BIN=${PYTHON_BIN:-/home/ysy/anaconda3/envs/hsa/bin/python}
 
 source config_models.sh
 MODEL_NAME=${1}
+if [ -z "${PYTHON_BIN:-}" ]; then
+    if [ "${MODEL_NAME}" = "qwen3-8b" ]; then
+        PYTHON_BIN=/home/ysy/anaconda3/envs/qwen3/bin/python
+    else
+        PYTHON_BIN=/home/ysy/anaconda3/envs/hsa/bin/python
+    fi
+fi
 MODEL_CONFIG=$(MODEL_SELECT ${MODEL_NAME} ${MODEL_DIR} ${ENGINE_DIR})
 IFS=":" read MODEL_PATH MODEL_TEMPLATE_TYPE MODEL_FRAMEWORK TOKENIZER_PATH TOKENIZER_TYPE OPENAI_API_KEY GEMINI_API_KEY AZURE_ID AZURE_SECRET AZURE_ENDPOINT <<< "$MODEL_CONFIG"
 if [ -z "${MODEL_PATH}" ]; then
@@ -116,6 +122,8 @@ for MAX_SEQ_LENGTH in "${SEQ_LENGTH_LIST[@]}"; do
     mkdir -p ${PRED_DIR}
 
     for TASK in "${TASK_LIST[@]}"; do
+        export RULER_CURRENT_SEQ_LENGTH=${MAX_SEQ_LENGTH}
+
         ${PYTHON_BIN} data/prepare.py             --save_dir ${DATA_DIR}             --benchmark ${BENCHMARK}             --task ${TASK}             --tokenizer_path ${TOKENIZER_PATH}             --tokenizer_type ${TOKENIZER_TYPE}             --max_seq_length ${MAX_SEQ_LENGTH}             --model_template_type ${MODEL_TEMPLATE_TYPE}             --num_samples ${NUM_SAMPLES}             ${REMOVE_NEWLINE_TAB}
 
         start_time=$(date +%s)
