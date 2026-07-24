@@ -16,7 +16,7 @@ import os
 import sys
 import torch
 from types import SimpleNamespace
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../'))
 if ROOT_DIR not in sys.path:
@@ -53,6 +53,20 @@ def _qwen3_yarn_factor(seq_length: int) -> float:
     return seq_length / QWEN3_ORIGINAL_MAX_POSITION_EMBEDDINGS
 
 
+def _streamingllm_config() -> Optional[Tuple[int, int]]:
+    window_size = os.getenv('STREAMINGLLM_WINDOW_SIZE', os.getenv('TOKEN_BUDGET', ''))
+    if not window_size:
+        return None
+
+    window_size = int(window_size)
+    if window_size <= 0:
+        return None
+
+    sink_size = int(os.getenv('STREAMINGLLM_SINK_SIZE', '4'))
+    sink_size = min(max(sink_size, 0), window_size)
+    return window_size, sink_size
+
+
 class HuggingFaceModel:
     def __init__(self, name_or_path: str, **generation_kwargs) -> None:
         from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
@@ -62,8 +76,9 @@ class HuggingFaceModel:
         lower_name_or_path = name_or_path.lower()
         self.is_llama = 'llama' in lower_name_or_path
         self.is_qwen3 = 'qwen3' in lower_name_or_path
+        self.streamingllm_config = _streamingllm_config() if self.method == 'streamingllm' else None
 
-        if self.is_llama and self.method == 'adamas':
+        if self.is_llama and self.method in {'adamas', 'streamingllm'}:
             from evaluation.llama import enable_tuple_kv_cache_for_llama
             enable_tuple_kv_cache_for_llama()
 
@@ -120,6 +135,34 @@ class HuggingFaceModel:
             elif self.is_qwen3:
                 from evaluation.adamas_attention_qwen3 import enable_adamas_attention_eval
                 enable_adamas_attention_eval(self.model, adamas_args)
+        elif self.method == 'streamingllm':
+            if self.streamingllm_config is None:
+                raise ValueError('METHOD=streamingllm requires STREAMINGLLM_WINDOW_SIZE or TOKEN_BUDGET.')
+            window_size, sink_size = self.streamingllm_config
+            self.streamingllm_recent_size = window_size - sink_size
+            from evaluation.streamingllm_attention import (
+                build_streamingllm_cache,
+                enable_llama_pos_shift_attention,
+                enable_qwen3_pos_shift_attention,
+            )
+            self.streamingllm_kv_cache = build_streamingllm_cache(
+                name_or_path,
+                start_size=sink_size,
+                recent_size=self.streamingllm_recent_size,
+            )
+            if self.is_llama:
+                enable_llama_pos_shift_attention(self.model)
+            elif self.is_qwen3:
+                enable_qwen3_pos_shift_attention(self.model)
+            else:
+                raise ValueError(f'METHOD=streamingllm is only wired for Llama/LongChat/Qwen3, got {name_or_path}.')
+            print(
+                f'StreamingLLM enabled: window_size={window_size}, '
+                f'sink_size={sink_size}, recent_size={self.streamingllm_recent_size}'
+            )
+        else:
+            self.streamingllm_kv_cache = None
+            self.streamingllm_recent_size = None
 
         self.generation_kwargs = generation_kwargs
         self.stop = self.generation_kwargs.pop('stop')
@@ -150,7 +193,7 @@ class HuggingFaceModel:
                 past_key_values=past_key_values,
                 use_cache=True,
             )
-            past_key_values = outputs.past_key_values
+            past_key_values = self._maybe_prune_streamingllm_cache(outputs.past_key_values)
             next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
             generated_tokens.append(next_token.item())
 
@@ -168,6 +211,22 @@ class HuggingFaceModel:
                     break
 
         return self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+
+    def _maybe_prune_streamingllm_cache(self, past_key_values):
+        if self.method != 'streamingllm':
+            return past_key_values
+
+        if self.is_qwen3:
+            from evaluation.streamingllm_attention import prune_dynamic_cache_start_recent
+            _, sink_size = self.streamingllm_config
+            return prune_dynamic_cache_start_recent(
+                past_key_values,
+                start_size=sink_size,
+                recent_size=self.streamingllm_recent_size,
+                device=self.model.device,
+            )
+
+        return self.streamingllm_kv_cache(past_key_values)
 
     def process_batch(self, prompts: List[str], **kwargs) -> List[dict]:
         if self.method in {'adamas', 'streamingllm'}:

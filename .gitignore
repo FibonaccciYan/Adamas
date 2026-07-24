@@ -228,3 +228,6 @@ test_results/*
 scripts/plot_*.py
 
 .codex
+
+scripts/ruler_streamingllm.sh
+evaluation/streamingllm_attention.py
