@@ -15,11 +15,29 @@ from evaluation.adamas_attention_qwen3 import enable_adamas_attention_eval as en
 from evaluation.adamas_cache import AdamasDynamicCache
 
 
+AIME_DATASETS = {
+    "aime2024": {
+        "path": "Maxwell-Jia/AIME_2024",
+        "problem_key": "Problem",
+        "answer_key": "Answer",
+        "id_key": "ID",
+        "output_prefix": "aime",
+    },
+    "aime2025": {
+        "path": "MathArena/aime_2025",
+        "problem_key": "problem",
+        "answer_key": "answer",
+        "id_key": "problem_idx",
+        "output_prefix": "aime2025",
+    },
+}
+
+
 SYSTEM_PROMPT = (
     # "Solve the following math problem step by step. Put your answer inside \boxed{{}}."
-    "Please reason step by step, and put your final answer within \boxed{}."
+    "Please reason step by step, and put your final answer within \\boxed{}."
     "{question}"
-    "Remember to put your answer inside \boxed{}."
+    "Remember to put your answer inside \\boxed{}."
 )
 
 
@@ -31,11 +49,17 @@ def parse_args(args=None):
         default=None,
         choices=["Meta-Llama-3.1-8B-Instruct", "Qwen3-8b"],
     )
+    parser.add_argument(
+        "--benchmark",
+        choices=AIME_DATASETS,
+        default="aime2024",
+    )
     parser.add_argument("--split", type=str, default="train")
     parser.add_argument("--max_new_tokens", type=int, default=2048)
     parser.add_argument("--output_dir", type=str, default="pred")
     parser.add_argument("--Adamas", action="store_true", help="Enable Adamas Attention")
     parser.add_argument("--token_budget", type=int, default=None)
+    parser.add_argument("--chunk_size", type=int, default=None)
     parser.add_argument("--thinking", action="store_true", help="Enable Qwen3 thinking mode (only valid when --model is set to Qwen3)")
     return parser.parse_args(args)
 
@@ -178,10 +202,11 @@ def generate_one(model, tokenizer, problem, max_new_tokens, model_name, enable_t
 def evaluate(model, tokenizer, dataset, args):
     correct = 0
     results = []
+    dataset_config = AIME_DATASETS[args.benchmark]
 
     for ex in tqdm(dataset):
-        problem = ex["Problem"]
-        gold = int(ex["Answer"])
+        problem = ex[dataset_config["problem_key"]]
+        gold = int(ex[dataset_config["answer_key"]])
         generated = generate_one(model, tokenizer, problem, args.max_new_tokens, args.model, args.thinking, args.Adamas)
         pred = extract_answer(generated)
         is_correct = pred == gold
@@ -189,7 +214,7 @@ def evaluate(model, tokenizer, dataset, args):
 
         results.append(
             {
-                "id": ex["ID"],
+                "id": ex[dataset_config["id_key"]],
                 "gold": gold,
                 "pred": pred,
                 "correct": is_correct,
@@ -200,9 +225,12 @@ def evaluate(model, tokenizer, dataset, args):
     accuracy = correct / len(results) if results else 0.0
     summary = {
         "model": args.model,
+        "benchmark": args.benchmark,
+        "dataset": dataset_config["path"],
         "split": args.split,
         "adamas": args.Adamas,
         "token_budget": args.token_budget if args.Adamas else None,
+        "chunk_size": args.chunk_size if args.Adamas else None,
         "max_new_tokens": args.max_new_tokens,
         "num_samples": len(results),
         "correct": correct,
@@ -216,8 +244,9 @@ def save_outputs(results, summary, args):
     os.makedirs(model_dir, exist_ok=True)
 
     suffix = f"{args.split}-{args.token_budget}" if args.Adamas else f"{args.split}-full"
-    pred_path = os.path.join(model_dir, f"aime-{suffix}.jsonl")
-    summary_path = os.path.join(model_dir, f"aime-{suffix}-summary.json")
+    output_prefix = AIME_DATASETS[args.benchmark]["output_prefix"]
+    pred_path = os.path.join(model_dir, f"{output_prefix}-{suffix}.jsonl")
+    summary_path = os.path.join(model_dir, f"{output_prefix}-{suffix}-summary.json")
 
     with open(pred_path, "w", encoding="utf-8") as f:
         for row in results:
@@ -233,7 +262,7 @@ def save_outputs(results, summary, args):
 if __name__ == "__main__":
     seed_everything(42)
     args = parse_args()
-    dataset = load_dataset("Maxwell-Jia/AIME_2024", split=args.split)
+    dataset = load_dataset(AIME_DATASETS[args.benchmark]["path"], split=args.split)
     model, tokenizer = load_model_and_tokenizer(args.model, args)
     results, summary = evaluate(model, tokenizer, dataset, args)
     pred_path, summary_path = save_outputs(results, summary, args)
