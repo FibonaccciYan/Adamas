@@ -1,7 +1,10 @@
-MODEL=Llama-3.1-8B-Instruct
+# MODEL=Llama-3.1-8B-Instruct
+MODEL=longchat-7b-v1.5-32k
 
-BUDGET_POOL=('256' '512' '1024' '2048' '4096' '102400') # 102400 is full cache version
-CONTEXT_POOL=('8192' '16384' '24576' '32768' '40960' '49152' '57344' '65565')
+# BUDGET_POOL=('256' '512' '1024' '2048' '4096' '102400') # 102400 is full cache version
+BUDGET_POOL=('256' '512' '1024' '2048' '4096' '133120')
+# CONTEXT_POOL=('8192' '16384' '24576' '32768' '40960' '49152' '57344' '65565')
+CONTEXT_POOL=('102400' '131072')
 
 OUTPUT_PATH="test_results/${MODEL}"
 mkdir -p $OUTPUT_PATH

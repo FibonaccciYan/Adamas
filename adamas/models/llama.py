@@ -396,14 +396,18 @@ class LlamaModel(LlamaPreTrainedModel):
             inputs_embeds = self.embed_tokens(input_ids)
         torch.cuda.nvtx.range_pop()
 
-        # embed positions
-        if attention_mask is None:
-            attention_mask = torch.ones(
-                (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
+        # Adamas' prefill/decode kernels apply causal masking internally. Do not
+        # materialize a dense [seq_len, seq_len] mask for long-context inputs.
+        if self.iController is not None:
+            attention_mask = None
+        else:
+            if attention_mask is None:
+                attention_mask = torch.ones(
+                    (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
+                )
+            attention_mask = self._prepare_decoder_attention_mask(
+                attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
             )
-        attention_mask = self._prepare_decoder_attention_mask(
-            attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
-        )
 
         hidden_states = inputs_embeds
 

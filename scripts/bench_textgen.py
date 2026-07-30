@@ -77,7 +77,7 @@ def benchmark_Adamas():
 
     # warmup
     hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
-    model(
+    model.model(
         inputs_embeds=hidden_states,
     )
     model.Adamas_clear()
@@ -93,7 +93,7 @@ def benchmark_Adamas():
         # Prefill Stage
         ts = time.perf_counter()
         hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
-        model(
+        model.model(
             inputs_embeds=hidden_states,
         )
         te = time.perf_counter()
@@ -102,7 +102,7 @@ def benchmark_Adamas():
         for _ in range(decode_len):
             ts = time.perf_counter()
             hidden_states = torch.randn(1, 1, hidden_size, dtype=dtype, device=device)
-            model(
+            model.model(
                 inputs_embeds=hidden_states,
             )
             te = time.perf_counter()
