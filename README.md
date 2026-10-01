@@ -1,147 +1,111 @@
-# Adamas: Hadamard Sparse Attention for Efficient Long-Context Inference
+# Adamas: Paper Reproduction
 
-![illustration](./Figures/illustration.png)
-
-## TL;DR
-
-We present Adamas, a lightweight yet accurate sparse attention mechanism, achieving up to 4.4× self-attention and 1.5× end-to-end speedups on 32K sequences with near-lossless accuracy.
-
-## Abstract
-
-Large language models (LLMs) now support context windows of hundreds of thousands to millions of tokens, enabling applications such as long-document summarization, large-scale code synthesis, multi-document question answering and persistent multi-turn dialogue. However, such extended contexts exacerbate the quadratic cost of self-attention, leading to severe latency in autoregressive decoding. Existing sparse attention methods alleviate these costs but rely on heuristic patterns that struggle to recall critical key-value (KV) pairs for each query, resulting in accuracy degradation. We introduce Adamas, a lightweight yet highly accurate sparse attention mechanism designed for long-context inference. Adamas applies the Hadamard transform, bucketization and 2-bit compression to produce compact representations, and leverages Manhattan-distance estimation for efficient top-k selections. Experiments show that Adamas matches the accuracy of full attention with only a 64-token budget, achieves near-lossless performance at 128, and supports up to 8x higher sparsity than prior state-of-the-art (SOTA) methods while delivering up to 4.4x self-attention and 1.5x end-to-end speedups on 32K-length sequences. Remarkably, Adamas attains comparable or even lower perplexity than full attention, underscoring its effectiveness in maintaining accuracy under aggressive sparsity. 
+This branch contains Adamas and full-attention reproduction code for LongBench, RULER,
+AIME 2024/2025, Passkey, PG19, and end-to-end decoding benchmarks.
+Datasets, predictions, logs, historical results, and figures are not distributed.
+Standalone NIAH, other sparse baselines, and ablation experiments are not included.
 
 ## Installation
 
-1. Clone the repository:
+Run the installation commands from the repository root. For a Git checkout,
+initialize the pinned third-party dependencies:
 
+```bash
+git submodule update --init --recursive
 ```
-git clone --recurse-submodules https://github.com/FibonaccciYan/Adamas
-cd Adamas
+
+Anonymous ZIP downloads do not include submodule contents or the root `.git`
+directory. Instead, fetch each third-party repository at the exact commit below
+into its expected location. Use fresh or empty dependency directories:
+
+```bash
+fetch_dependency() (
+    set -e
+    local directory="$1" repository="$2" commit="$3"
+    git init "$directory"
+    git -C "$directory" fetch --depth 1 "$repository" "$commit"
+    git -C "$directory" checkout --detach FETCH_HEAD
+    git -C "$directory" submodule update --init --recursive
+)
+
+mkdir -p kernels/3rdparty
+fetch_dependency kernels/3rdparty/flashinfer https://github.com/flashinfer-ai/flashinfer 9f49803b1db0a40ea0019ad98b8bb5d4f1593c77
+fetch_dependency kernels/3rdparty/pybind https://github.com/pybind/pybind11 768cebe17e65c2a0a64ed067510729efc3c7ff6c
+fetch_dependency kernels/3rdparty/applied-ai https://github.com/meta-pytorch/applied-ai e51188201328043a3a9c6413af9f740449ecff70
 ```
 
-2. Install dependency libraries:
+These commands create independent Git checkouts inside the extracted ZIP;
+they do not require the Adamas source repository or its Git history.
+Both installation methods preserve third-party licenses and attribution.
+After either method, install the Python dependencies:
 
-```
-conda create -yn adamas python=3.10
-conda activate adamas
-
-# Adamas
+```bash
 pip install -e .
-
-# Flash-Attention
 pip install ninja packaging
 pip install flash-attn==2.5.8 --no-build-isolation
-
-# Install CMake (with version >= 3.26.4)
-conda install cmake
-
-# build libraft
-cd kernels/3rdparty/raft
-./build.sh libraft
-
-# build faster_hadamard_transform
-cd kernels/3rdparty/applied-ai/kernels/cuda/inference/hadamard_transform
-pip install -e .
+pip install -e kernels/3rdparty/applied-ai/kernels/cuda/inference/hadamard_transform
 ```
 
-3. Compile kernel benchmarks (Optional).
+Use separate environments: Llama-3.1 and LongChat use Transformers 4.45.2;
+Qwen3 uses Transformers 4.51.0. In the Qwen3 environment, run
+`pip install transformers==4.51.0` after installing this package.
+Use PyTorch 2.5.0 and FlashAttention 2.5.8 in both environments.
+The editable installation pins the Llama environment; reinstalling it resets
+Transformers. GPU evaluations require CUDA and access to the model weights.
+LongChat uses FastChat's `fastchat.model` module, provided by the `fschat` dependency.
 
-```
-cd kernels
-mkdir build && cd build
-cmake ..
-make -j
-```
+E2E additionally requires CMake >= 3.26.4, a CUDA compiler, and compiled operators.
+The build downloads RAPIDS/RAFT dependencies automatically and requires network access:
 
-4. Build end-to-end operators
-
-```
-cd adamas/ops
-bash setup.sh
-```
-
-## Accuracy Evaluation
-
-Our evaluations are based on [LongChat-7B-v1.5-32K](https://huggingface.co/lmsys/longchat-7b-v1.5-32k?clone=true) and [Yarn-Llama2-7B-128K](https://huggingface.co/NousResearch/Yarn-Llama-2-7b-128k) models, which are capable of handling long-context text generations. We evaluate passkey retrieval, LongBench benchmarks and PG-19 perplexity tests. We provide several scripts to reproduce our results in the paper:
-
-To get the Passkey Retrieval results, please modify and execute:
-
-```
-bash scripts/passkey.sh
+```bash
+(cd adamas/ops && bash setup.sh)
 ```
 
-To reproduce the LongBench results, please modify and execute:
+RULER's Hugging Face data-generation and evaluation dependencies are included
+in this package. Use the model-specific Transformers versions above.
+LongBench, AIME, and PG19 download their datasets through Hugging Face.
+RULER also needs SQuAD/HotpotQA and Paul Graham source data; follow its README.
 
-```
+## Run
+
+All entries work from any current directory. Select the environment with
+`PYTHON_BIN`, and optionally provide a local checkpoint using `MODEL_PATH`.
+For example, use `MODEL_PATH=/path/to/Llama-3.1-8B-Instruct` for local weights;
+otherwise the scripts use public Hugging Face model IDs.
+Adamas and full attention run by default where the paper reports both.
+Passkey runs Adamas only, matching the absence of a Full row in Table 5.
+
+```bash
 bash scripts/longbench.sh
-```
-
-To evaluate the perplexity results of PG-19, please execute:
-
-```
+MODEL=longchat-v1.5-7b-32k bash scripts/longbench.sh
+MODEL=Qwen3-8b PYTHON_BIN=/path/to/qwen3/python bash scripts/longbench.sh
+bash scripts/ruler.sh
+PYTHON_BIN=/path/to/qwen3/python bash scripts/aime.sh
+bash scripts/passkey.sh
+MODEL_PATH=lmsys/longchat-7b-v1.5-32k CONTEXT_LENGTH=32000 bash scripts/passkey.sh
 bash scripts/ppl_eval.sh
+MODEL=longchat-7b-v1.5-32k CONTEXT_LENGTHS="49152 57344" bash scripts/bench_efficiency_e2e.sh
 ```
 
-## Efficiency Evaluation
+| Entry | Defaults / controls |
+| --- | --- |
+| LongBench | Llama-3.1; six paper tasks; `MODEL`, `TASKS`, `BUDGETS` |
+| RULER | Llama-3.1; all synthetic tasks, 4K-128K; `MODEL=llama3.1-8b-instruct` or `qwen3-8b`, `GPU`, `BUDGETS`, `RULER_SEQ_LENGTHS` (comma-separated), `RULER_TASKS`, `RULER_NUM_SAMPLES` |
+| AIME | Both 2024 and 2025, Qwen3 thinking mode, greedy decoding; budgets 1024/2048/4096 and Full; `BENCHMARKS`, `BUDGETS_AIME`, `REPEATS=3`, `MAX_NEW_TOKENS=38912` |
+| Passkey | Yarn-Llama-2-7B-128K, length argument 100000; `MODEL_PATH`, `CONTEXT_LENGTH`, `ITERATIONS=100`, `BUDGETS_PASSKEY` |
+| PG19 | Llama-3.1, first PG19 test document; `MODEL_PATH`, `NUM_EVAL_TOKENS=32000`, `BUDGETS` |
+| E2E | Llama-3.1, 32K; `MODEL` (Llama-3.1 or LongChat), `MODEL_PATH`, `CONTEXT_LENGTHS`, `DECODE_LENGTH=256`, `ITERATIONS=10`, `BUDGETS` |
 
-Kernels and end-to-end effiency are evaluated on NVIDIA A6000 GPUs with CUDA version of 12.4. We provide several scripts to reproduce our results in the paper:
+The shared accuracy interface in `evaluation/attention.py` dispatches by
+`model.config.model_type`: Llama-3.1/LongChat use the Llama implementation;
+Qwen3 uses its own implementation. E2E uses the existing CUDA Llama pipeline
+and does not support Qwen3. Yarn's remote implementation requires separate
+runtime verification.
 
-### Kernel-level Efficiency
-
-To reproduce the kernel performance shown in paper, please execute:
-
-```
-bash scripts/bench_kernels.sh
-```
-
-We also release the unit tests and benchmarks used for kernel implementations. Correctness of kernel is verified by unit tests in kernels/src/test, while performance is evaluated by NVBench in kernels/src/bench. We also test the correctness of PyBind operators in adamas/tests with PyTorch results via PyTest.
-
-(WIP) To test the correctness of kernels, please execute:
-
-```
-cd kernels/build
-./test_batch_decode # or any other operator
-```
-
-(Recommended) Or utilize PyTest:
-
-```
-cd adamas/tests
-PYTHONPATH=$PYTHONPATH:../../ pytest
-```
-
-
-### End-to-end Efficiency
-
-Adamas can achieve up to 1.5x end-to-end speedup on 32K sequences with near-lossless accuracy. We incorporate all implemented operators into a full pipeline to evaluate the end-to-end efficiency in text generations based on the [Huggingface Transformers](https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py) as shown in adamas/models/Adamas.py.
-
-To reproduce the end-to-end efficiency results, please execute:
-
-```
-bash scripts/bench_efficiency_e2e.sh
-```
-
-## Examples
-
-We provide several examples to demonstrate the usage of Quest. These examples are implemented with the end-to-end integration of Quest operators, and can be executed with the following commands (please make sure you have setup all the operators):
-
-```
-python3 scripts/example_textgen.py
-```
-
-## Reference
-
-If you find this project useful for your research, please consider citing our paper：
-```
-@misc{yan2025adamas,
-    title = {Adamas: Hadamard Sparse Attention for Efficient Long-Context Inference},
-    author = {Siyuan Yan and Guo-Qing Jiang and Yuchen Zhang and Xiaoxing Ma and Ran Zhu and Chun Cao and Jingwei Xu},
-    year = {2025},
-    eprint = {arXiv:2510.18413},
-}
-```
-
-## Credits
-
-This codebase is built upon [Quest](https://github.com/mit-han-lab/Quest)
-. We sincerely thank the authors for their excellent work!
+The Passkey evaluator's historical `--fixed-length` argument scales the filler
+character count and reports the actual token count; it is not an exact token
+length guarantee. AIME repeats save into separate directories. LongBench has
+an evaluation step, RULER generates task summaries, AIME saves answer scores,
+Passkey saves retrieval results, PG19 saves NLL/PPL, and E2E saves latency logs.
+Outputs are ignored by Git. Each experiment script directly invokes its evaluator.
+E2E uses a token budget covering the allocated cache for its existing Full path.

@@ -195,7 +195,7 @@ def main(args):
             trust_remote_code=True,
         )
 
-        if 'qwen3' in model.lower() and args.fixed_length > 32768:
+        if 'qwen3' in model.lower() and (args.fixed_length or args.max_tokens) > 32768:
             config.rope_scaling = {
                 "rope_type": "yarn",
                 "factor": 4.0,
@@ -216,7 +216,7 @@ def main(args):
 
         if args.Adamas:
             print("Enable Adamas attention")
-            from evaluation.adamas_attention_qwen3 import (
+            from evaluation.attention import (
                 enable_adamas_attention_eval,
             )
 

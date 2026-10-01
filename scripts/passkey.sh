@@ -1,20 +1,14 @@
-cd evaluation/passkey
-
-MODEL=Qwen3-8b
-MODELPATH=/data1/model/qwen/Qwen/Qwen3-8B
-# MODEL="Meta-Llama-3.1-8B-Instruct"
-# MODELPATH=/data1/model/llama3/meta-llama/Llama-3.1-8B-Instruct
-
-OUTPUT_DIR=results/$MODEL
-mkdir -p $OUTPUT_DIR
-
-length=100000
-
-for token_budget in 16 32 64 128 256 512 1024 2048 4096
-do
-    python passkey.py -m $MODELPATH \
-        --iterations 100 --fixed-length $length \
-        --Adamas --token_budget $token_budget --chunk_size 1 \
-        --output-file $OUTPUT_DIR/$MODEL-Adamas-$token_budget.jsonl \
-        # --thinking
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
+export PYTHONPATH="${REPO_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+PYTHON_BIN=${PYTHON_BIN:-python}
+cd "$REPO_DIR/evaluation/passkey"
+MODEL_PATH=${MODEL_PATH:-NousResearch/Yarn-Llama-2-7b-128k}
+output="results/${MODEL_PATH##*/}"
+mkdir -p "$output"
+for budget in ${BUDGETS_PASSKEY:-16 32 64 128 256 512 1024 2048 4096}; do
+    "$PYTHON_BIN" -u passkey.py -m "$MODEL_PATH" --iterations "${ITERATIONS:-100}" \
+        --fixed-length "${CONTEXT_LENGTH:-100000}" --Adamas --token_budget "$budget" \
+        --chunk_size 1 --output-file "$output/Adamas-${budget}.jsonl"
 done

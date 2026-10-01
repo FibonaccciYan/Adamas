@@ -31,6 +31,9 @@ parser.add_argument("--thinking", action="store_true", help="Enable Qwen3 thinki
 
 def load(model_name_or_path):
     print(f"Loading model from {model_name_or_path} ...")
+    if "llama" in model_name_or_path.lower() or "longchat" in model_name_or_path.lower():
+        from evaluation.llama import enable_tuple_kv_cache_for_llama
+        enable_tuple_kv_cache_for_llama()
 
     tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path,
@@ -70,7 +73,7 @@ else:
 
 if args.Adamas:
     print("Enable Adamas attention")
-    from evaluation.adamas_attention_qwen3 import (
+    from evaluation.attention import (
         enable_adamas_attention_eval,
     )
 

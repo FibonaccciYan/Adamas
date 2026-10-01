@@ -1,31 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
-
-GPU=${GPU:-0}
-MODEL_NAME=${MODEL_NAME:-llama3.1-8b-instruct}
-BENCHMARK=${BENCHMARK:-synthetic}
-PYTHONPATH_ROOT=${PYTHONPATH_ROOT:-/data0/ysy/Adamas}
-if [ -z "${PYTHON_BIN:-}" ]; then
-    if [ "${MODEL_NAME}" = "qwen3-8b" ]; then
-        PYTHON_BIN=/home/ysy/anaconda3/envs/qwen3/bin/python
-    else
-        PYTHON_BIN=/home/ysy/anaconda3/envs/hsa/bin/python
-    fi
-fi
-ADAMAS_BUDGETS=${ADAMAS_BUDGETS:-"256 512 1024 2048 4096"}
-ROOT_DIR=${ROOT_DIR:-benchmark_root}
-
-export METHOD=adamas
-export PYTHONPATH=${PYTHONPATH_ROOT}
-export PYTHON_BIN
-export ROOT_DIR
-
-cd /data0/ysy/Adamas/evaluation/RULER/scripts
-
-for BUDGET in ${ADAMAS_BUDGETS}; do
-    export ADAMAS_TOKEN_BUDGET=${BUDGET}
-    export METHOD_TAG="adamas_${BUDGET}"
-
-    echo "Launching RULER with METHOD=adamas, METHOD_TAG=${METHOD_TAG}, GPU=${GPU}, TOKEN_BUDGET=${BUDGET}, MODEL=${MODEL_NAME}, BENCHMARK=${BENCHMARK}"
-    CUDA_VISIBLE_DEVICES="${GPU}" bash run.sh "${MODEL_NAME}" "${BENCHMARK}"
+REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
+export PYTHONPATH="${REPO_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+PYTHON_BIN=${PYTHON_BIN:-python}
+cd "$REPO_DIR/evaluation/RULER/scripts"
+export PYTHON_BIN METHOD=adamas
+METHOD=full METHOD_TAG=full METHOD_BUDGET= \
+    CUDA_VISIBLE_DEVICES="${GPU:-0}" bash run.sh "${MODEL:-llama3.1-8b-instruct}" synthetic
+for budget in ${BUDGETS:-256 512 1024 2048 4096}; do
+    export ADAMAS_TOKEN_BUDGET=$budget METHOD_TAG="adamas_${budget}"
+    CUDA_VISIBLE_DEVICES="${GPU:-0}" bash run.sh "${MODEL:-llama3.1-8b-instruct}" synthetic
 done

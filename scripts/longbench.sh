@@ -1,21 +1,17 @@
-cd evaluation/LongBench
-
-model="longchat-v1.5-7b-32k"
-# model="Meta-Llama-3.1-8B-Instruct"
-# model="Qwen3-8b"
-
-for task in "qasper" "narrativeqa" "hotpotqa" "multifieldqa_en" "triviaqa" "gov_report"
-do
-    python -u pred.py \
-        --model $model --task $task
-
-    for budget in 256 512 1024 2048 4096
-    do
-        python -u pred.py \
-            --model $model --task $task \
-            --Adamas --token_budget $budget --chunk_size 1 \
-            # --thinking
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
+export PYTHONPATH="${REPO_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+PYTHON_BIN=${PYTHON_BIN:-python}
+model_args=()
+[[ -z ${MODEL_PATH:-} ]] || model_args=(--model_path "$MODEL_PATH")
+cd "$REPO_DIR/evaluation/LongBench"
+MODEL=${MODEL:-Meta-Llama-3.1-8B-Instruct}
+for task in ${TASKS:-qasper narrativeqa hotpotqa multifieldqa_en triviaqa gov_report}; do
+    "$PYTHON_BIN" -u pred.py --model "$MODEL" "${model_args[@]}" --task "$task"
+    for budget in ${BUDGETS:-256 512 1024 2048 4096}; do
+        "$PYTHON_BIN" -u pred.py --model "$MODEL" "${model_args[@]}" \
+            --task "$task" --Adamas --token_budget "$budget" --chunk_size 1
     done
 done
-
-python -u eval.py --model $model
+"$PYTHON_BIN" -u eval.py --model "$MODEL"

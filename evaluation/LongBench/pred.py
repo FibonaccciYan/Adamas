@@ -10,7 +10,7 @@ from tqdm import tqdm
 import numpy as np
 import random
 import argparse
-from evaluation.adamas_attention import enable_adamas_attention_eval 
+from evaluation.attention import enable_adamas_attention_eval
 from evaluation.adamas_cache import AdamasDynamicCache
 
 
@@ -29,6 +29,7 @@ def parse_args(args=None):
     parser.add_argument("--e", action="store_true", help="Evaluate on LongBench-E")
 
     parser.add_argument("--task", type=str, help="task name", required=True)
+    parser.add_argument("--model_path", help="Local directory or Hugging Face model ID")
 
     parser.add_argument("--token_budget", type=int, default=None)
     parser.add_argument("--chunk_size", type=int, default=None)
@@ -248,7 +249,7 @@ if __name__ == "__main__":
     model_name = args.model
     # define your model
     model, tokenizer = load_model_and_tokenizer(
-        model2path[model_name], model_name, args
+        args.model_path or model2path[model_name], model_name, args
     )
     max_length = model2maxlen[model_name]
     if args.e:

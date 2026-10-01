@@ -10,8 +10,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from evaluation.adamas_attention import enable_adamas_attention_eval as enable_adamas_attention_eval_llama3
-from evaluation.adamas_attention_qwen3 import enable_adamas_attention_eval as enable_adamas_attention_eval_qwen3
+from evaluation.attention import enable_adamas_attention_eval
 from evaluation.adamas_cache import AdamasDynamicCache
 
 
@@ -55,6 +54,7 @@ def parse_args(args=None):
         default="aime2024",
     )
     parser.add_argument("--split", type=str, default="train")
+    parser.add_argument("--model_path", help="Local directory or Hugging Face model ID")
     parser.add_argument("--max_new_tokens", type=int, default=2048)
     parser.add_argument("--output_dir", type=str, default="pred")
     parser.add_argument("--Adamas", action="store_true", help="Enable Adamas Attention")
@@ -101,7 +101,7 @@ def load_model_and_tokenizer(model_name, args):
         from evaluation.llama import enable_tuple_kv_cache_for_llama
         enable_tuple_kv_cache_for_llama()
 
-    model_path = resolve_model_path(model_name)
+    model_path = args.model_path or resolve_model_path(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
@@ -113,10 +113,7 @@ def load_model_and_tokenizer(model_name, args):
     model = model.eval()
 
     if args.Adamas:
-        if "llama" in model_name.lower():
-            enable_adamas_attention_eval_llama3(model, args)
-        elif "qwen3" in model_name.lower():
-            enable_adamas_attention_eval_qwen3(model, args)
+        enable_adamas_attention_eval(model, args)
 
     return model, tokenizer
 
@@ -156,6 +153,7 @@ def generate_one(model, tokenizer, problem, max_new_tokens, model_name, enable_t
             **inputs,
             past_key_values=past_key_values,
             max_new_tokens=max_new_tokens,
+            do_sample=False,
         )
         output_ids = generated_ids[0][len(inputs.input_ids[0]):].tolist() 
 

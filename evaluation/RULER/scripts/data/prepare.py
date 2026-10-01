@@ -54,7 +54,7 @@ parser.add_argument("--benchmark", type=str, default='synthetic', help='Options:
 parser.add_argument("--task", type=str, required=True, help='tasks in benchmark')
 parser.add_argument("--subset", type=str, default='validation', help='Options: validation or test')
 parser.add_argument("--tokenizer_path", type=str, required=True, help='path to the tokenizer model')
-parser.add_argument("--tokenizer_type",  type=str, default='nemo', help='[Options] nemo, hf, openai.')
+parser.add_argument("--tokenizer_type", type=str, default='hf', choices=['hf'])
 parser.add_argument("--max_seq_length", type=int, required=True, help='max sequence length including all input tokens and generated tokens.')
 parser.add_argument("--num_samples", type=int, default=500, help='maximum number of samples we want to test')
 parser.add_argument("--random_seed", type=int, default=42)

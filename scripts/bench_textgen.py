@@ -20,11 +20,11 @@ class ModelConfig:
 MODEL_CFGS = {
     "Llama-3.1-8B-Instruct":
         ModelConfig(
-            model_path="/data1/model/llama3/meta-llama/Llama-3.1-8B-Instruct"
+            model_path="meta-llama/Llama-3.1-8B-Instruct"
         ),
     "longchat-7b-v1.5-32k":
         ModelConfig(
-            model_path="/data0/ysy/models/lmsys/longchat-7b-v1.5-32k"
+            model_path="lmsys/longchat-7b-v1.5-32k"
         ),
 }
 
@@ -46,6 +46,7 @@ def benchmark_Adamas():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=MODEL_CFGS.keys(), default="Llama-3.1-8B-Instruct")
     parser.add_argument("--context_len", type=int, default=2*1024)
+    parser.add_argument("--model_path", help="Local directory or Hugging Face model ID")
     parser.add_argument("--decode_len", type=int, default=256)
     parser.add_argument("--page_size", type=int, default=1)
     parser.add_argument("--token_budget", type=int, default=256)
@@ -54,6 +55,8 @@ def benchmark_Adamas():
 
     assert args.model in MODEL_CFGS, f"Model {args.model} not found in MODEL_CFGS"
     model_cfg = MODEL_CFGS[args.model]
+    if args.model_path:
+        model_cfg.model_path = args.model_path
     
     max_seq_len = args.context_len + args.decode_len + 512
     page_size = args.page_size
@@ -80,6 +83,7 @@ def benchmark_Adamas():
     model.model(
         inputs_embeds=hidden_states,
     )
+    torch.cuda.synchronize()
     model.Adamas_clear()
 
 
@@ -91,11 +95,13 @@ def benchmark_Adamas():
         torch.cuda.empty_cache()
 
         # Prefill Stage
+        torch.cuda.synchronize()
         ts = time.perf_counter()
         hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
         model.model(
             inputs_embeds=hidden_states,
         )
+        torch.cuda.synchronize()
         te = time.perf_counter()
         prefill_latency.append(te - ts)
         # Start decoding decode_len tokens
@@ -105,6 +111,7 @@ def benchmark_Adamas():
             model.model(
                 inputs_embeds=hidden_states,
             )
+            torch.cuda.synchronize()
             te = time.perf_counter()
             decode_latency.append(te - ts)
         

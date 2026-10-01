@@ -16,7 +16,7 @@ import os
 import sys
 import torch
 from types import SimpleNamespace
-from typing import Dict, List, Optional, Tuple
+from typing import List
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../'))
 if ROOT_DIR not in sys.path:
@@ -29,15 +29,13 @@ def _normalize_method() -> str:
     method = os.getenv('METHOD', 'full').strip().lower()
     aliases = {
         'adamas': 'adamas',
-        'quest': 'quest',
-        'streamingllm': 'streamingllm',
-        'streaming_llm': 'streamingllm',
-        'streaming': 'streamingllm',
         'hf': 'full',
         'full': 'full',
         'none': 'full',
     }
-    return aliases.get(method, method)
+    if method not in aliases:
+        raise ValueError(f'Unsupported METHOD: {method}; use adamas or full.')
+    return aliases[method]
 
 
 def _current_ruler_seq_length() -> int:
@@ -53,20 +51,6 @@ def _qwen3_yarn_factor(seq_length: int) -> float:
     return seq_length / QWEN3_ORIGINAL_MAX_POSITION_EMBEDDINGS
 
 
-def _streamingllm_config() -> Optional[Tuple[int, int]]:
-    window_size = os.getenv('STREAMINGLLM_WINDOW_SIZE', os.getenv('TOKEN_BUDGET', ''))
-    if not window_size:
-        return None
-
-    window_size = int(window_size)
-    if window_size <= 0:
-        return None
-
-    sink_size = int(os.getenv('STREAMINGLLM_SINK_SIZE', '4'))
-    sink_size = min(max(sink_size, 0), window_size)
-    return window_size, sink_size
-
-
 class HuggingFaceModel:
     def __init__(self, name_or_path: str, **generation_kwargs) -> None:
         from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
@@ -76,24 +60,9 @@ class HuggingFaceModel:
         lower_name_or_path = name_or_path.lower()
         self.is_llama = 'llama' in lower_name_or_path
         self.is_qwen3 = 'qwen3' in lower_name_or_path
-        self.streamingllm_config = _streamingllm_config() if self.method == 'streamingllm' else None
-
-        if self.is_llama and self.method in {'adamas', 'streamingllm'}:
+        if self.is_llama and self.method == 'adamas':
             from evaluation.llama import enable_tuple_kv_cache_for_llama
             enable_tuple_kv_cache_for_llama()
-
-            # if self.method == 'adamas':
-            #     from evaluation.adamas_attention import (
-            #         enable_adamas_attention_eval,
-            #         enable_adamas_dynamic_cache_for_llama,
-            #     )
-            #     enable_adamas_dynamic_cache_for_llama()
-            # elif self.method == 'streamingllm':
-            #     from evaluation.streamingllm_attention import (
-            #         enable_streamingllm_attention_eval,
-            #         enable_streamingllm_dynamic_cache_for_llama,
-            #     )
-            #     enable_streamingllm_dynamic_cache_for_llama()
 
         model_kwargs = {}
         if 'Yarn-Llama' not in name_or_path:
@@ -129,40 +98,8 @@ class HuggingFaceModel:
             adamas_args = SimpleNamespace(
                 token_budget=int(os.getenv('ADAMAS_TOKEN_BUDGET', '1024')),
             )
-            if self.is_llama:
-                from evaluation.adamas_attention import enable_adamas_attention_eval
-                enable_adamas_attention_eval(self.model, adamas_args)
-            elif self.is_qwen3:
-                from evaluation.adamas_attention_qwen3 import enable_adamas_attention_eval
-                enable_adamas_attention_eval(self.model, adamas_args)
-        elif self.method == 'streamingllm':
-            if self.streamingllm_config is None:
-                raise ValueError('METHOD=streamingllm requires STREAMINGLLM_WINDOW_SIZE or TOKEN_BUDGET.')
-            window_size, sink_size = self.streamingllm_config
-            self.streamingllm_recent_size = window_size - sink_size
-            from evaluation.streamingllm_attention import (
-                build_streamingllm_cache,
-                enable_llama_pos_shift_attention,
-                enable_qwen3_pos_shift_attention,
-            )
-            self.streamingllm_kv_cache = build_streamingllm_cache(
-                name_or_path,
-                start_size=sink_size,
-                recent_size=self.streamingllm_recent_size,
-            )
-            if self.is_llama:
-                enable_llama_pos_shift_attention(self.model)
-            elif self.is_qwen3:
-                enable_qwen3_pos_shift_attention(self.model)
-            else:
-                raise ValueError(f'METHOD=streamingllm is only wired for Llama/LongChat/Qwen3, got {name_or_path}.')
-            print(
-                f'StreamingLLM enabled: window_size={window_size}, '
-                f'sink_size={sink_size}, recent_size={self.streamingllm_recent_size}'
-            )
-        else:
-            self.streamingllm_kv_cache = None
-            self.streamingllm_recent_size = None
+            from evaluation.attention import enable_adamas_attention_eval
+            enable_adamas_attention_eval(self.model, adamas_args)
 
         self.generation_kwargs = generation_kwargs
         self.stop = self.generation_kwargs.pop('stop')
@@ -193,7 +130,7 @@ class HuggingFaceModel:
                 past_key_values=past_key_values,
                 use_cache=True,
             )
-            past_key_values = self._maybe_prune_streamingllm_cache(outputs.past_key_values)
+            past_key_values = outputs.past_key_values
             next_token = outputs.logits[:, -1, :].argmax(dim=-1, keepdim=True)
             generated_tokens.append(next_token.item())
 
@@ -212,24 +149,8 @@ class HuggingFaceModel:
 
         return self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
 
-    def _maybe_prune_streamingllm_cache(self, past_key_values):
-        if self.method != 'streamingllm':
-            return past_key_values
-
-        if self.is_qwen3:
-            from evaluation.streamingllm_attention import prune_dynamic_cache_start_recent
-            _, sink_size = self.streamingllm_config
-            return prune_dynamic_cache_start_recent(
-                past_key_values,
-                start_size=sink_size,
-                recent_size=self.streamingllm_recent_size,
-                device=self.model.device,
-            )
-
-        return self.streamingllm_kv_cache(past_key_values)
-
     def process_batch(self, prompts: List[str], **kwargs) -> List[dict]:
-        if self.method in {'adamas', 'streamingllm'}:
+        if self.method == 'adamas':
             generated_texts = [self._generate_one_sparse(prompt) for prompt in prompts]
         else:
             inputs = self.tokenizer(prompts, return_tensors='pt', padding=True).to(self.model.device)
@@ -257,36 +178,3 @@ class HuggingFaceModel:
             results.append({'text': [text]})
 
         return results
-
-
-class MambaModel:
-    def __init__(self, name_or_path: str, **generation_kwargs) -> None:
-        from transformers import AutoTokenizer
-        from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
-
-        self.tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-neox-20b')
-        self.device = 'cuda'
-        self.model = MambaLMHeadModel.from_pretrained(name_or_path, device=self.device, dtype=torch.bfloat16)
-        self.generation_kwargs = generation_kwargs
-        self.stop = self.generation_kwargs.pop('stop')
-        self.max_genlen = self.generation_kwargs.pop('max_new_tokens')
-
-    def __call__(self, prompt: str, **kwargs) -> Dict[str, List[str]]:
-        tokens = self.tokenizer(prompt, return_tensors='pt')
-        input_ids = tokens.input_ids.to(self.device)
-        max_length = input_ids.shape[1] + self.max_genlen
-
-        out = self.model.generate(
-            input_ids=input_ids,
-            max_length=max_length,
-            cg=True,
-            return_dict_in_generate=True,
-            output_scores=True,
-            enable_timing=False,
-            **self.generation_kwargs,
-        )
-        assert len(out.sequences) == 1
-        return {'text': [self.tokenizer.decode(out.sequences[0][input_ids.shape[1]:])]}
-
-    def process_batch(self, prompts: List[str], **kwargs) -> List[dict]:
-        return [self.__call__(prompt, **kwargs) for prompt in prompts]
