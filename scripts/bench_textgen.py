@@ -80,6 +80,7 @@ def benchmark_Adamas():
     model.model(
         inputs_embeds=hidden_states,
     )
+    torch.cuda.synchronize()
     model.Adamas_clear()
 
 
@@ -91,11 +92,13 @@ def benchmark_Adamas():
         torch.cuda.empty_cache()
 
         # Prefill Stage
+        torch.cuda.synchronize()
         ts = time.perf_counter()
         hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
         model.model(
             inputs_embeds=hidden_states,
         )
+        torch.cuda.synchronize()
         te = time.perf_counter()
         prefill_latency.append(te - ts)
         # Start decoding decode_len tokens
@@ -105,6 +108,7 @@ def benchmark_Adamas():
             model.model(
                 inputs_embeds=hidden_states,
             )
+            torch.cuda.synchronize()
             te = time.perf_counter()
             decode_latency.append(te - ts)
         

@@ -1,5 +1,5 @@
-# MODEL=Llama-3.1-8B-Instruct
-MODEL=longchat-7b-v1.5-32k
+MODEL=Llama-3.1-8B-Instruct
+# MODEL=longchat-7b-v1.5-32k
 
 # BUDGET_POOL=('256' '512' '1024' '2048' '4096' '102400') # 102400 is full cache version
 BUDGET_POOL=('256' '512' '1024' '2048' '4096' '133120')

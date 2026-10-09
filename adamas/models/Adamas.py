@@ -45,6 +45,7 @@ class Adamas(nn.Module):
         self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias)
+        self.prefill_attention = None
         self._init_rope()
 
 
@@ -145,11 +146,19 @@ class Adamas(nn.Module):
             torch.cuda.nvtx.range_pop()
             
             torch.cuda.nvtx.range_push("prefill_attn")
-            attn_output = adamas.utils.prefill_forward(
-                query_states,
-                iController,
-                self.layer_idx,
-            )
+            if self.prefill_attention is None:
+                attn_output = adamas.utils.prefill_forward(
+                    query_states,
+                    iController,
+                    self.layer_idx,
+                )
+            else:
+                attn_output = self.prefill_attention(
+                    query_states,
+                    key_states,
+                    value_states,
+                    self.layer_idx,
+                )
             torch.cuda.nvtx.range_pop()
         else:
             # We concat after RoPE
