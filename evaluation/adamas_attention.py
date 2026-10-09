@@ -390,20 +390,5 @@ global layer_id
 layer_id = 32
 
 def enable_adamas_attention_eval(model, args):
-    for name, module in reversed(model._modules.items()):
-        if len(list(module.children())) > 0:
-            enable_adamas_attention_eval(
-                module,
-                args,
-            )
-
-        global layer_id
-        if name == "self_attn":
-            layer_id -= 1
-            model._modules[name].layer_id = layer_id
-            model._modules[name].flash_forward = model._modules[name].forward
-            model._modules[name].forward = types.MethodType(
-                adamas_forward, model._modules[name]
-            )
-
-            model._modules[name].token_budget = args.token_budget
+    from evaluation.attention import enable_adamas_attention_eval as enable
+    enable(model, args)

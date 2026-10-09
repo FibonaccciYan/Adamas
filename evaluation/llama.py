@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.functional as F
@@ -6,14 +6,11 @@ import torch.functional as F
 import transformers.models
 from transformers.models.llama.modeling_llama import (
     LlamaForCausalLM,
-    CausalLMOutputWithPast,
-    List,
-    Union,
-    CrossEntropyLoss,
-    BaseModelOutputWithPast,
     apply_rotary_pos_emb,
 )
 import types
+from torch.nn import CrossEntropyLoss
+from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 
 from flash_attn import flash_attn_func, flash_attn_varlen_func
 from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input
@@ -491,6 +488,9 @@ def old_llama_decoder_layer_forward(
 
 
 def enable_tuple_kv_cache_for_llama():
+    # Modern Llama manages Cache objects without replacing model-wide forwards.
+    if tuple(int(part) for part in transformers.__version__.split('.')[:2]) >= (4, 51):
+        return
     print("Enabling tuple KV cache for Llama")
     transformers.models.llama.modeling_llama.LlamaModel._prepare_decoder_attention_mask = (
         lambda *args, **kwargs: None

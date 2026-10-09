@@ -63,14 +63,14 @@ model, tokenizer = load(args.model_name_or_path)
 nlls = []
 loss_fn = CrossEntropyLoss(reduction="none")
 
-if args.Adamas and "qwen3" in args.model_name_or_path.lower():
+if args.Adamas:
     past_key_values = AdamasDynamicCache()
 else:
     past_key_values = None
 
 if args.Adamas:
     print("Enable Adamas attention")
-    from evaluation.adamas_attention_qwen3 import (
+    from evaluation.attention import (
         enable_adamas_attention_eval,
     )
 

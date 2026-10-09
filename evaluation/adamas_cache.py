@@ -13,6 +13,7 @@ class AdamasDynamicCache(Cache):
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self.key_cache: List[torch.Tensor] = []
         self.value_cache: List[torch.Tensor] = []
         self.hadamard_cache: List[torch.Tensor] = []
@@ -50,7 +51,7 @@ class AdamasDynamicCache(Cache):
         hadamard_states: torch.Tensor,
         layer_idx: int,
         cache_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Updates the cache with the new `key_states`, `value_states` and `hadamard_key_proj` for the layer `layer_idx`.
 
@@ -94,6 +95,9 @@ class AdamasDynamicCache(Cache):
 
     def get_max_length(self) -> Optional[int]:
         """Returns the maximum sequence length of the cached states. DynamicCache does not have a maximum length."""
+        return None
+
+    def get_max_cache_shape(self) -> Optional[int]:
         return None
 
     def to_legacy_cache(self) -> Tuple[Tuple[torch.Tensor], Tuple[torch.Tensor], Tuple[torch.Tensor]]:
@@ -170,3 +174,6 @@ class AdamasDynamicCache(Cache):
             self.key_cache[layer_idx] = self.key_cache[layer_idx][indices, ...]
             self.value_cache[layer_idx] = self.value_cache[layer_idx][indices, ...]
             self.hadamard_cache[layer_idx] = self.hadamard_cache[layer_idx][indices, ...]
+
+    def reorder_cache(self, beam_idx: torch.LongTensor):
+        self.batch_select_indices(beam_idx)

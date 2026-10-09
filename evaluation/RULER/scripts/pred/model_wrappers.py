@@ -129,12 +129,8 @@ class HuggingFaceModel:
             adamas_args = SimpleNamespace(
                 token_budget=int(os.getenv('ADAMAS_TOKEN_BUDGET', '1024')),
             )
-            if self.is_llama:
-                from evaluation.adamas_attention import enable_adamas_attention_eval
-                enable_adamas_attention_eval(self.model, adamas_args)
-            elif self.is_qwen3:
-                from evaluation.adamas_attention_qwen3 import enable_adamas_attention_eval
-                enable_adamas_attention_eval(self.model, adamas_args)
+            from evaluation.attention import enable_adamas_attention_eval
+            enable_adamas_attention_eval(self.model, adamas_args)
         elif self.method == 'streamingllm':
             if self.streamingllm_config is None:
                 raise ValueError('METHOD=streamingllm requires STREAMINGLLM_WINDOW_SIZE or TOKEN_BUDGET.')
@@ -176,7 +172,7 @@ class HuggingFaceModel:
         return self.process_batch([prompt], **kwargs)[0]
 
     def _generate_one_sparse(self, prompt: str) -> str:
-        if self.method == 'adamas' and self.is_qwen3:
+        if self.method == 'adamas':
             from evaluation.adamas_cache import AdamasDynamicCache
             past_key_values = AdamasDynamicCache()
         else:

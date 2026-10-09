@@ -51,7 +51,7 @@ class Adamas(nn.Module):
 
     def _init_rope(self):
         if self.config.rope_scaling is None:
-            self.rotary_emb = LlamaRotaryEmbedding(self.head_dim, max_position_embeddings=self.max_position_embeddings)
+            self.rotary_emb = LlamaRotaryEmbedding(config=self.config)
             self.rope_scale = 1.0
         else:
             scaling_type = self.config.rope_scaling.get("type", self.config.rope_scaling.get("rope_type"))

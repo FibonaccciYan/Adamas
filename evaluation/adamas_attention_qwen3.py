@@ -381,7 +381,7 @@ def yarn_forward(
     return attn_output, attn_weights, past_key_value
 
 
-def qwen3_adamas_forward_4_51_0(
+def adamas_forward_4_51_0(
     self,
     hidden_states: torch.Tensor,
     position_embeddings: Tuple[torch.Tensor, torch.Tensor],
@@ -389,12 +389,17 @@ def qwen3_adamas_forward_4_51_0(
     past_key_value: Optional[Cache] = None,
     cache_position: Optional[torch.LongTensor] = None,
     **kwargs: Unpack[FlashAttentionKwargs],
-) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
     input_shape = hidden_states.shape[:-1]
     hidden_shape = (*input_shape, -1, self.head_dim)
 
-    query_states = self.q_norm(self.q_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
-    key_states = self.k_norm(self.k_proj(hidden_states).view(hidden_shape)).transpose(1, 2)
+    query_states = self.q_proj(hidden_states).view(hidden_shape)
+    key_states = self.k_proj(hidden_states).view(hidden_shape)
+    if self.config.model_type == "qwen3":
+        query_states = self.q_norm(query_states)
+        key_states = self.k_norm(key_states)
+    query_states = query_states.transpose(1, 2)
+    key_states = key_states.transpose(1, 2)
     value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
 
     cos, sin = position_embeddings
@@ -407,10 +412,19 @@ def qwen3_adamas_forward_4_51_0(
     if past_key_value is not None:
         # sin and cos are specific to RoPE models; cache_position needed for the static cache
         cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-        key_states, value_states, hadamard_states = past_key_value.update(key_states, value_states, hadamard_states, self.layer_idx, cache_kwargs)
+        from evaluation.adamas_cache import AdamasDynamicCache
+        if isinstance(past_key_value, AdamasDynamicCache):
+            key_states, value_states, hadamard_states = past_key_value.update(
+                key_states, value_states, hadamard_states, self.layer_idx, cache_kwargs
+            )
+        else:
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, self.layer_idx, cache_kwargs
+            )
+            hadamard_states = faster_hadamard_transform.hadamard_transform(key_states, inplace=False)
 
 
-    if input_shape[1] > 1 or self.layer_idx < 2:
+    if input_shape[1] > 1 or self.layer_idx < 2 or self.token_budget >= key_states.shape[-2]:
         attention_interface: Callable = eager_attention_forward
         if self.config._attn_implementation != "eager":
             if self.config._attn_implementation == "sdpa" and kwargs.get("output_attentions", False):
@@ -429,7 +443,7 @@ def qwen3_adamas_forward_4_51_0(
             attention_mask,
             dropout=0.0 if not self.training else self.attention_dropout,
             scaling=self.scaling,
-            sliding_window=self.sliding_window,  # diff with Llama
+            sliding_window=getattr(self, "sliding_window", None),
             **kwargs,
         )
 
@@ -465,9 +479,12 @@ def qwen3_adamas_forward_4_51_0(
 
         attn_weights = attn_weights.masked_fill(~mask_bottom, torch.tensor(torch.finfo(attn_weights.dtype).min))
         
-        if attention_mask is not None:  # no matter the length, we just slice it
-            causal_mask = attention_mask[:, :, :, : key_code.shape[-2]]
-            attn_weights = attn_weights + causal_mask
+        if attention_mask is not None:
+            if attention_mask.ndim == 2:
+                padding_mask = attention_mask[:, None, None, :key_states.shape[-2]] == 0
+                attn_weights = attn_weights.masked_fill(padding_mask, torch.finfo(attn_weights.dtype).min)
+            else:
+                attn_weights = attn_weights + attention_mask[:, :, :, :key_states.shape[-2]]
         
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
@@ -481,17 +498,5 @@ def qwen3_adamas_forward_4_51_0(
 
 
 def enable_adamas_attention_eval(model, args):
-    for name, module in reversed(model._modules.items()):
-        if len(list(module.children())) > 0:
-            enable_adamas_attention_eval(
-                module,
-                args,
-            )
-
-        if name == "self_attn":
-            model._modules[name].flash_forward = model._modules[name].forward
-            model._modules[name].forward = types.MethodType(
-                qwen3_adamas_forward_4_51_0, model._modules[name]
-            )
-
-            model._modules[name].token_budget = args.token_budget
+    from evaluation.attention import enable_adamas_attention_eval as enable
+    enable(model, args)

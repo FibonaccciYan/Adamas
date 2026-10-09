@@ -10,8 +10,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from evaluation.adamas_attention import enable_adamas_attention_eval as enable_adamas_attention_eval_llama3
-from evaluation.adamas_attention_qwen3 import enable_adamas_attention_eval as enable_adamas_attention_eval_qwen3
+from evaluation.attention import enable_adamas_attention_eval
 from evaluation.adamas_cache import AdamasDynamicCache
 
 
@@ -113,10 +112,7 @@ def load_model_and_tokenizer(model_name, args):
     model = model.eval()
 
     if args.Adamas:
-        if "llama" in model_name.lower():
-            enable_adamas_attention_eval_llama3(model, args)
-        elif "qwen3" in model_name.lower():
-            enable_adamas_attention_eval_qwen3(model, args)
+        enable_adamas_attention_eval(model, args)
 
     return model, tokenizer
 
@@ -171,7 +167,7 @@ def generate_one(model, tokenizer, problem, max_new_tokens, model_name, enable_t
 
         return content
     else:
-        past_key_values = None
+        past_key_values = AdamasDynamicCache() if Adamas else None
 
         with torch.no_grad():
             output = model(

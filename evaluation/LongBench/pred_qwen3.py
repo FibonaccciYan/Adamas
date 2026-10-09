@@ -10,7 +10,7 @@ from tqdm import tqdm
 import numpy as np
 import random
 import argparse
-from evaluation.adamas_attention_qwen3 import enable_adamas_attention_eval 
+from evaluation.attention import enable_adamas_attention_eval
 from evaluation.adamas_cache import AdamasDynamicCache
 
 
@@ -138,7 +138,7 @@ def get_pred(
                 ],
             )[0]
         else:
-            if args.Adamas and "qwen3" in model_name.lower():
+            if args.Adamas:
                 past_key_values = AdamasDynamicCache()
             else:
                 past_key_values = None

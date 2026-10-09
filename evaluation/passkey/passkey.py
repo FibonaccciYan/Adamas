@@ -72,7 +72,7 @@ def test_model(pipe, prompt_text, pass_key, model, args):
     q_input = pipe.tokenizer(que, return_tensors="pt").to("cuda")
     q_input.input_ids = q_input.input_ids[:, 1:]
 
-    if args.Adamas and "qwen3" in model.lower():
+    if args.Adamas:
         past_key_values = AdamasDynamicCache()
     else:
         past_key_values = None
@@ -216,7 +216,7 @@ def main(args):
 
         if args.Adamas:
             print("Enable Adamas attention")
-            from evaluation.adamas_attention_qwen3 import (
+            from evaluation.attention import (
                 enable_adamas_attention_eval,
             )
 
