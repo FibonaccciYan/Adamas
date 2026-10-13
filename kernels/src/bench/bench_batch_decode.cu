@@ -40,7 +40,9 @@ void bench_flashinfer_batch_decode(nvbench::state& state) {
 	size_t num_kv_heads = state.get_int64("num_kv_heads");
 	bool cooperative = state.get_int64("cooperative");
 
-	assert(num_qo_heads == num_kv_heads); // Not support GQA now
+	if(num_qo_heads % num_kv_heads != 0) {
+		state.skip("num_qo_heads must be divisible by num_kv_heads");
+	}
 	// KV cache:
 	size_t num_pages = flashinfer::ceil_div(seqlen, page_size);
 	size_t last_page_len = (seqlen - 1) % page_size + 1;
@@ -49,6 +51,8 @@ void bench_flashinfer_batch_decode(nvbench::state& state) {
 	page_budget = std::min(page_budget, num_pages);
 	std::vector<int32_t> kv_indptr_host(
 		{0, static_cast<int32_t>(page_budget - 1)}); // Not Contain the last page
+	// Sparse indices are selected per QO head. The decode kernel maps each QO head
+	// to its KV head internally, so this layout supports both MHA and GQA.
 	std::vector<int32_t> kv_indicies_host(num_qo_heads * (page_budget - 1));
 	for(size_t head = 0; head < num_qo_heads; ++head) {
 		std::vector<int32_t> page_indices_head_raw(num_pages - 1);
@@ -138,7 +142,7 @@ void bench_flashinfer_batch_decode(nvbench::state& state) {
 		.add_int64_axis("page_budget", {64, 128, 256, 512})                               \
 		.add_int64_axis("page_size", {1})                                                \
 		.add_int64_axis("num_qo_heads", {32})                                             \
-		.add_int64_axis("num_kv_heads", {32})                                             \
+		.add_int64_axis("num_kv_heads", {8, 32})                                          \
 		.add_int64_axis("cooperative", {1})
 
 BENCH_FLASHINFER_BATCH_DECODE(half);

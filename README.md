@@ -44,6 +44,20 @@ cd kernels/3rdparty/applied-ai/kernels/cuda/inference/hadamard_transform
 pip install -e . --no-build-isolation
 ```
 
+Main development uses Transformers 4.51.0 for Llama-3.1, LongChat, and Qwen3.
+Accuracy evaluations share `evaluation/attention.py` and the modern Cache API;
+the legacy tuple-cache entry point does not patch Llama on this version.
+To check local checkpoints from the repository root:
+
+```bash
+PYTHONPATH=. python scripts/check_transformers_compat.py \
+    --models /path/to/Llama-3.1-8B-Instruct /path/to/longchat-7b-v1.5-32k /path/to/Qwen3-8B
+```
+
+Use `--tiny --backend sdpa` to check the same architectures with small random
+weights before loading full checkpoints. The check covers Full/Adamas prefill,
+cached decoding, generation, left padding, and both native/custom caches.
+
 3. Compile kernel benchmarks (Optional).
 
 ```

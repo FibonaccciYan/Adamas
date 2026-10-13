@@ -8,6 +8,8 @@ from torch.nn import CrossEntropyLoss
 import argparse
 from argparse import ArgumentParser
 
+from evaluation.adamas_cache import AdamasDynamicCache
+
 device = "cuda"
 
 parser = argparse.ArgumentParser()
@@ -24,12 +26,12 @@ parser.add_argument("--num_eval_tokens", type=int, default=None)
 
 parser.add_argument("--Adamas", action="store_true", help="Enable Adamas attention")
 parser.add_argument("--token_budget", type=int, default=1024)
-parser.add_argument("--chunk_size", type=int, default=16)
+parser.add_argument("--thinking", action="store_true", help="Enable Qwen3 thinking mode (only valid when --model is set to Qwen3)")
 
 
 def load(model_name_or_path):
     print(f"Loading model from {model_name_or_path} ...")
-    # however, tensor parallel for running falcon will occur bugs
+
     tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path,
         trust_remote_code=True,
@@ -38,15 +40,16 @@ def load(model_name_or_path):
         model_name_or_path,
         device_map="auto",
         torch_dtype=torch.float16,
-        trust_remote_code=True,
+        trust_remote_code=True, 
+        attn_implementation="flash_attention_2"
     )
+    model.eval()
+
     if tokenizer.pad_token_id is None:
         if tokenizer.eos_token_id is not None:
             tokenizer.pad_token_id = tokenizer.eos_token_id
         else:
             tokenizer.pad_token_id = 0
-
-    model.eval()
 
     return model, tokenizer
 
@@ -59,18 +62,26 @@ model, tokenizer = load(args.model_name_or_path)
 
 nlls = []
 loss_fn = CrossEntropyLoss(reduction="none")
-past_key_values = None
+
+if args.Adamas:
+    past_key_values = AdamasDynamicCache()
+else:
+    past_key_values = None
 
 if args.Adamas:
     print("Enable Adamas attention")
-    from evaluation.adamas_attention import (
+    from evaluation.attention import (
         enable_adamas_attention_eval,
     )
 
     enable_adamas_attention_eval(model, args)
 
 os.makedirs(args.output_dir, exist_ok=True)
-f = open(f"{args.output_dir}/log_Adamas_{args.token_budget}.txt", "w")
+if args.Adamas:
+    log_output_path = f"{args.output_dir}/log_Adamas_{args.token_budget}.txt"
+else:
+    log_output_path = f"{args.output_dir}/log_full.txt"
+f = open(log_output_path, "w")
 
 num_eval_tokens = 0
 for text in data["text"][:1]:
@@ -110,5 +121,11 @@ f.close()
 
 ppl = torch.exp(torch.stack(nlls).mean())
 print(ppl.item())
-with open(f"{args.output_dir}/ppl_Adamas_{args.token_budget}.txt", "w") as f:
+
+if args.Adamas:
+    ppl_output_path = f"{args.output_dir}/ppl_Adamas_{args.token_budget}.txt"
+else:
+    ppl_output_path = f"{args.output_dir}/ppl_full.txt"
+
+with open(ppl_output_path, "w") as f:
     f.write(f"{ppl.item()}\n")

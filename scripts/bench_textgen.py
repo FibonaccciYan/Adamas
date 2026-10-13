@@ -3,6 +3,7 @@
 
 import argparse
 import dataclasses
+from pathlib import Path
 import time
 import numpy as np
 import torch
@@ -17,9 +18,13 @@ class ModelConfig:
   device: str = dataclasses.field(default="cuda:0")
 
 MODEL_CFGS = {
-    "llama2-7b":
+    "Llama-3.1-8B-Instruct":
         ModelConfig(
-            model_path="/path/to/lmsys/longchat-7b-v1.5-32k"
+            model_path="/data1/model/llama3/meta-llama/Llama-3.1-8B-Instruct"
+        ),
+    "longchat-7b-v1.5-32k":
+        ModelConfig(
+            model_path="/data0/ysy/models/lmsys/longchat-7b-v1.5-32k"
         ),
 }
 
@@ -39,7 +44,7 @@ def load_model(model_cfg: ModelConfig):
 @torch.inference_mode()
 def benchmark_Adamas():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=MODEL_CFGS.keys(), default="llama2-7b")
+    parser.add_argument("--model", choices=MODEL_CFGS.keys(), default="Llama-3.1-8B-Instruct")
     parser.add_argument("--context_len", type=int, default=2*1024)
     parser.add_argument("--decode_len", type=int, default=256)
     parser.add_argument("--page_size", type=int, default=1)
@@ -72,9 +77,10 @@ def benchmark_Adamas():
 
     # warmup
     hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
-    model(
+    model.model(
         inputs_embeds=hidden_states,
     )
+    torch.cuda.synchronize()
     model.Adamas_clear()
 
 
@@ -86,20 +92,23 @@ def benchmark_Adamas():
         torch.cuda.empty_cache()
 
         # Prefill Stage
+        torch.cuda.synchronize()
         ts = time.perf_counter()
         hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
-        model(
+        model.model(
             inputs_embeds=hidden_states,
         )
+        torch.cuda.synchronize()
         te = time.perf_counter()
         prefill_latency.append(te - ts)
         # Start decoding decode_len tokens
         for _ in range(decode_len):
             ts = time.perf_counter()
             hidden_states = torch.randn(1, 1, hidden_size, dtype=dtype, device=device)
-            model(
+            model.model(
                 inputs_embeds=hidden_states,
             )
+            torch.cuda.synchronize()
             te = time.perf_counter()
             decode_latency.append(te - ts)
         
@@ -111,7 +120,8 @@ def benchmark_Adamas():
     print("page_size,token_budget,context_len,decode_len,avg_prefill_latency,avg_decode_latency")
     print(f"{page_size},{token_budget},{context_len},{decode_len},{avg_prefill_latency},{avg_decode_latency}")
 
-    output_file = f"../test_results/e2e_Adamas.txt"
+    output_file = Path(__file__).resolve().parents[1] / "test_results" / args.model / "e2e_Adamas.txt"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, "a") as f:
         f.write(f"{page_size},{token_budget},{context_len},{decode_len},{avg_prefill_latency},{avg_decode_latency}\n")
 

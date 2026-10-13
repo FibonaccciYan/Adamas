@@ -10,7 +10,7 @@ dependencies = [
     "torch==2.5.0",
     "torchaudio==2.5.0",
     "torchvision==0.20.0",
-    "transformers==4.45.2",
+    "transformers==4.51.0",
     "accelerate==1.0.1",
     "sentencepiece==0.2.0",
     "datasets==3.0.1",
@@ -23,7 +23,7 @@ dependencies = [
     "rouge_score==0.1.2",
     "einops==0.8.0",
     "pandas==2.2.3",
-    "fastchat==0.1.0",
+    "fschat==0.2.36",
     "numpy==2.1.2"
 ]
 

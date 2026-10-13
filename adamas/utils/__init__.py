@@ -14,8 +14,10 @@ __all__ = [
     'InferenceController',
     "BatchDecodeWithPagedKVCacheWrapper",
     "append_kv",
+    "append_kvh_decode_fused",
     "prefill_forward",
     "decode_estimate",
+    "decode_estimate_topk",
     "decode_topk",
     "decode_sparse_attn",
     "rms_norm_forward",
@@ -94,35 +96,37 @@ def rms_norm_forward(
 def append_kvh(
     k: torch.Tensor,
     v: torch.Tensor,
-    h: torch.Tensor,
+    h_k: torch.Tensor,
     iController: InferenceController,
     layer_idx: int,
+    h_q: Optional[torch.Tensor] = None, # Only used for decode stage
 ):
     """
-    Semantics of `append_kv`:
-    Append new generated k/v into kvh cache.
+    Semantics of `append_kvh`:
+    Append new generated k/v/h_k into kvh cache.
     Automatically dispatch to Prefill / Decode Kernel
 
     Notations for shapes:
     `N`: sequence length
-    `H`: number of heads
+    `H_q`: number of query heads
+    `H_{kv}`: number of key/value heads
     `D`: head dimension
     `MAXLEN`: maximum length of the KV cache
 
     Args:
-        k: Shape: `[N, H, D]`. Key projection (`X @ W_k`).
-        v: Shape: `[N, H, D]`. Value projection (`X @ W_v`).
-        h: Shape: 1. Prefill stage: `[N, H, D]`. Hadamard projection (`hadamard_transform(k)`). 
-                  2. Decode stage: `[2N, H, D]`. Hadamard projection (`hadamard_transform(cat((q, k), dim=0))`).
+        k: Shape: `[N, H_{kv}, D]`. Key projection (`X @ W_k`).
+        v: Shape: `[N, H_{kv}, D]`. Value projection (`X @ W_v`).
+        h_q: Shape: `[N, H_q, D]`. Hadamard projection of Query (`hadamard_transform(q)`). 
+        h_k: Sahpe: `[N, H_{kv}, D]`. Hadamard projection of Key (`hadamard_transform(k)`).
         iController: InferenceController object, which contains all needed information.
         layer_idx: Layer index of the KV cache.
     """
-    seq_len, num_heads, head_dim = k.shape
+    seq_len, num_kv_heads, head_dim = k.shape
     if seq_len > 1:
         _kernels.append_kv_cache_prefill(
             k,
             v,
-            h,
+            h_k,
             iController.kv_cache.buf_layer(layer_idx),
             iController.kv_indices_with_last,
             iController.kv_indptr_for_append,
@@ -136,11 +140,12 @@ def append_kvh(
             iController.layout
         )
     else:
-        o = torch.empty(seq_len, num_heads, head_dim // 8, dtype=h.dtype, device=h.device)
+        o = torch.empty(seq_len, iController.num_qo_heads, head_dim // 8, dtype=h_q.dtype, device=h_q.device)
         _kernels.append_kv_cache_decode(
             k,
             v,
-            h,
+            h_q,
+            h_k,
             o,
             iController.kv_cache.buf_layer(layer_idx),
             iController.kv_indices_with_last,
@@ -155,6 +160,52 @@ def append_kvh(
             iController.layout
         )
         return o    
+    
+def append_kvh_decode_fused(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    iController: InferenceController,
+    layer_idx: int,
+):
+    """
+    Semantics of `append_kvh_decode_fused`:
+    Append new generated k/v/h_k into kvh cache, return 2-bit query code.
+
+    Notations for shapes:
+    `N`: sequence length
+    `H_q`: number of query heads
+    `H_{kv}`: number of key/value heads
+    `D`: head dimension
+    `MAXLEN`: maximum length of the KV cache
+
+    Args:
+        q: Shape: `[N, H_q, D]`. Key projection (`X @ W_k`).
+        k: Shape: `[N, H_{kv}, D]`. Key projection (`X @ W_k`).
+        v: Shape: `[N, H_{kv}, D]`. Value projection (`X @ W_v`).
+        iController: InferenceController object, which contains all needed information.
+        layer_idx: Layer index of the KV cache.
+    """
+    seq_len, num_kv_heads, head_dim = k.shape
+    o = torch.empty(seq_len, iController.num_qo_heads, head_dim // 8, dtype=q.dtype, device=q.device)
+    _kernels.append_kv_cache_decode_fused(
+        q,
+        k,
+        v,
+        o,
+        iController.kv_cache.buf_layer(layer_idx),
+        iController.kv_indices_with_last,
+        iController.kv_indptr_for_append,
+        iController.kv_cache.last_page_len,
+        iController.kv_last_page_idx,
+        iController.hadamard_cache.buf_layer(layer_idx),
+        iController.hadamard_indices,
+        iController.hadamard_indptr_for_append,
+        iController.hadamard_cache.last_page_len,
+        iController.hadamard_last_page_idx,
+        iController.layout
+    )
+    return o    
 
 def prefill_forward(
     q: torch.Tensor,
@@ -191,7 +242,10 @@ def prefill_forward(
         q,
         iController.kv_cache.buf_layer(layer_idx),
         iController.kv_indices_with_last,
+        iController.prefill_q_indptr,
+        iController.kv_indptr_for_append,
         iController.kv_cache.last_page_len,
+        iController.kv_last_page_idx,
         True, # Casual
         iController.layout,
         False, # FP16 Accumulator for 4090
@@ -223,7 +277,7 @@ def decode_estimate(
     """
     f = _kernels.estimate_attn_score
     # (iController.metadata_cache.seqlen - 1) is manually excluding the last elements, which is the current page.
-    o = torch.empty((iController.num_heads, iController.hadamard_cache.seqlen - 1), dtype=q.dtype, device=q.device)
+    o = torch.empty((iController.num_qo_heads, iController.hadamard_cache.seqlen - 1), dtype=q.dtype, device=q.device)
     f(
         q,
         o,
@@ -266,6 +320,34 @@ def decode_topk(
         iController.topk_dindices_buffer,
         iController.topk_buf,
         page_budet,
+    )
+
+def decode_estimate_topk(
+    q: torch.Tensor,
+    iController: InferenceController,
+    layer_idx: int,
+):
+    """
+    Estimate sparse attention scores and select top-k pages without materializing
+    the full `[num_qo_heads, seqlen]` score matrix in Python.
+    """
+    page_budget = iController.inference_page_budget - 1
+    f = _kernels.estimate_topk_filtering
+    f(
+        q,
+        iController.group_topk_dout_buffer,
+        iController.group_topk_dindices_buffer,
+        iController.topk_dout_buffer,
+        iController.topk_dindices_buffer,
+        iController.estimate_topk_candidate_values,
+        iController.topk_buf,
+        iController.hadamard_cache.buf_layer(layer_idx),
+        iController.hadamard_indices,
+        iController.hadamard_indptr_for_append,
+        iController.hadamard_cache.last_page_len,
+        iController.hadamard_last_page_idx,
+        iController.layout,
+        page_budget,
     )
 
 def decode_sparse_attn(

@@ -215,13 +215,19 @@ outputs/
 
 *.ipynb
 
-evaluation/LongBench/pred
-evaluation/LongBench/pred_e
+evaluation/LongBench/pred*
 evaluation/passkey/results
 evaluation/pg19/results
+evaluation/RULER/scripts/benchmark_root
+evaluation/AIME/pred
 
 *.egg-info/
 
 test_results/*
 
 scripts/plot_*.py
+
+.codex
+
+scripts/ruler_streamingllm.sh
+evaluation/streamingllm_attention.py

@@ -14,6 +14,7 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, SequenceClassifierOutputWithPast
 from transformers.modeling_utils import PreTrainedModel
+from transformers.generation import GenerationMixin
 from transformers.utils import add_start_docstrings, add_start_docstrings_to_model_forward, logging, replace_return_docstrings
 from transformers.models.llama.configuration_llama import LlamaConfig
 
@@ -396,14 +397,18 @@ class LlamaModel(LlamaPreTrainedModel):
             inputs_embeds = self.embed_tokens(input_ids)
         torch.cuda.nvtx.range_pop()
 
-        # embed positions
-        if attention_mask is None:
-            attention_mask = torch.ones(
-                (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
+        # Adamas' prefill/decode kernels apply causal masking internally. Do not
+        # materialize a dense [seq_len, seq_len] mask for long-context inputs.
+        if self.iController is not None:
+            attention_mask = None
+        else:
+            if attention_mask is None:
+                attention_mask = torch.ones(
+                    (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
+                )
+            attention_mask = self._prepare_decoder_attention_mask(
+                attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
             )
-        attention_mask = self._prepare_decoder_attention_mask(
-            attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
-        )
 
         hidden_states = inputs_embeds
 
@@ -504,7 +509,7 @@ class LlamaModel(LlamaPreTrainedModel):
         )
 
 
-class LlamaForCausalLM(LlamaPreTrainedModel):
+class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
@@ -539,7 +544,8 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         
         self.model.iController = InferenceController(
             num_layers=config.num_hidden_layers,
-            num_heads=config.num_attention_heads,
+            num_qo_heads=config.num_attention_heads,
+            num_kv_heads=config.num_key_value_heads,
             head_dim=config.hidden_size // config.num_attention_heads,
             page_size=page_size,
             page_budget=self.model._Adamas_page_budget,

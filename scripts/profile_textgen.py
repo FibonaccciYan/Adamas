@@ -25,10 +25,10 @@ class ModelConfig:
   device: str = dataclasses.field(default="cuda:0")
 
 MODEL_CFGS = {
-    "llama2-7b":
+    "Llama-3.1-8B-Instruct":
         ModelConfig(
-            model_path="/path/to/llama2/meta-llama/Llama-2-7b-chat-hf"
-        ),
+            model_path="/data1/model/llama3/meta-llama/Llama-3.1-8B-Instruct"
+        )
 }
 
 def load_model(model_cfg: ModelConfig):
@@ -47,12 +47,14 @@ def load_model(model_cfg: ModelConfig):
 @torch.inference_mode()
 def benchmark_Adamas():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=MODEL_CFGS.keys(), default="llama2-7b")
+    parser.add_argument("--model", choices=MODEL_CFGS.keys(), default="Llama-3.1-8B-Instruct")
     parser.add_argument("--context_len", type=int, default=2*1024)
     parser.add_argument("--decode_len", type=int, default=256)
     parser.add_argument("--page_size", type=int, default=16)
     parser.add_argument("--token_budget", type=int, default=256)
     parser.add_argument("--iteration", type=int, default=1)
+    parser.add_argument("--record_shapes", action="store_true")
+    parser.add_argument("--with_stack", action="store_true")
     args = parser.parse_args()
 
     assert args.model in MODEL_CFGS, f"Model {args.model} not found in MODEL_CFGS"
@@ -84,29 +86,34 @@ def benchmark_Adamas():
         # clear cuda cache
         torch.cuda.empty_cache()
 
-        # Prefill Stage
-        ts = time.perf_counter()
-        hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
-        model(
-            inputs_embeds=hidden_states,
-        )
-        te = time.perf_counter()
-        prefill_latency.append(te - ts)
 
         # Start decoding decode_len tokens
         with profile(activities=[
-            ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True, with_stack=True) as prof:
+            ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            record_shapes=args.record_shapes,
+            with_stack=args.with_stack) as prof:
+
+            with record_function("model_prefill"):
+                # Prefill Stage
+                hidden_states = torch.randn(1, context_len, hidden_size, dtype=dtype, device=device)
+                ts = time.perf_counter()
+                model(
+                    inputs_embeds=hidden_states,
+                )
+                te = time.perf_counter()
+                prefill_latency.append(te - ts)
+                
             with record_function("model_inference"):
                 for _ in range(decode_len):
-                    ts = time.perf_counter()
                     hidden_states = torch.randn(1, 1, hidden_size, dtype=dtype, device=device)
+                    ts = time.perf_counter()
                     model(
                         inputs_embeds=hidden_states,
                     )
                     te = time.perf_counter()
                     decode_latency.append(te - ts)
                     prof.step()
-        prof.export_chrome_trace(f"../test_results/profile_{token_budget}-{context_len}.json")
+        prof.export_chrome_trace(f"../test_results/{args.model}/profile_{token_budget}-{context_len}.json")
         model.Adamas_clear()
     
     avg_prefill_latency = np.mean(prefill_latency)

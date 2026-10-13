@@ -1,12 +1,18 @@
-cd scripts
+MODEL=Llama-3.1-8B-Instruct
+# MODEL=longchat-7b-v1.5-32k
 
-BUDGET_POOL=('64' '128' '256' '512' '1024' '2048' '4096' '102400') # 102400 is full cache version
-CONTEXT_POOL=('8192' '16384' '32768')
+# BUDGET_POOL=('256' '512' '1024' '2048' '4096' '102400') # 102400 is full cache version
+BUDGET_POOL=('256' '512' '1024' '2048' '4096' '133120')
+# CONTEXT_POOL=('8192' '16384' '24576' '32768' '40960' '49152' '57344' '65565')
+CONTEXT_POOL=('102400' '131072')
+
+OUTPUT_PATH="test_results/${MODEL}"
+mkdir -p $OUTPUT_PATH
 
 for budget in "${BUDGET_POOL[@]}"
 do
     for context in "${CONTEXT_POOL[@]}"
     do
-        python3 bench_textgen.py --context_len $context --decode_len 256 --token_budget $budget --iteration 1 --page_size 1 > "../test_results/log_${budget}_${context}_164.log" 2>&1
+        python3 scripts/bench_textgen.py --model $MODEL --context_len $context --decode_len 256 --token_budget $budget --page_size 1 > "${OUTPUT_PATH}/log_${budget}_${context}.log" 2>&1
     done
 done
